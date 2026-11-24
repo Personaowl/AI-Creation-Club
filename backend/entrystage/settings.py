@@ -22,7 +22,7 @@ ALLOWED_HOSTS = env_list("ENTRYSTAGE_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]"
 CSRF_TRUSTED_ORIGINS = env_list("ENTRYSTAGE_CSRF_TRUSTED_ORIGINS")
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    "entrystage.admin_site.ClubAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -46,6 +46,7 @@ WSGI_APPLICATION = "entrystage.wsgi.application"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -93,6 +94,7 @@ USE_I18N = True
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 STATIC_URL = "/static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = VAR_DIR / "static"
 MEDIA_ROOT = Path(os.environ.get("ENTRYSTAGE_UPLOAD_ROOT", VAR_DIR / "uploads"))
 FILE_UPLOAD_PERMISSIONS = 0o600

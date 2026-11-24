@@ -79,7 +79,7 @@ class AccessChangeInline(admin.TabularInline):
 @admin.register(Work)
 class WorkAdmin(admin.ModelAdmin):
     form = WorkReviewForm
-    list_display = ("title", "owner", "status", "is_visible", "allow_download", "updated_at")
+    list_display = ("title", "display_owner", "status", "is_visible", "allow_download", "updated_at")
     list_filter = ("status", "is_visible", "allow_download")
     search_fields = ("title", "owner__username")
     list_select_related = ("owner",)
@@ -90,6 +90,13 @@ class WorkAdmin(admin.ModelAdmin):
         ("已通过作品权限", {"fields": ("is_visible", "allow_download")}),
     )
     inlines = (AssetInline, ReviewInline, AccessChangeInline)
+
+    @admin.display(description="作者", ordering="owner")
+    def display_owner(self, obj):
+        return obj.owner
+
+    def changelist_view(self, request, extra_context=None):
+        return super().changelist_view(request, {"title": "竞赛作品", **(extra_context or {})})
 
     def has_add_permission(self, request):
         return False

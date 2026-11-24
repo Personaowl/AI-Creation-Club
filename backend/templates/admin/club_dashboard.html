@@ -1,0 +1,61 @@
+{% extends "admin/index.html" %}
+{% load log %}
+
+{% block bodyclass %}{{ block.super }} club-dashboard{% endblock %}
+{% block coltype %}colM{% endblock %}
+
+{% block content_title %}
+  <header class="club-dashboard-heading">
+    <h1>{{ title }}</h1>
+    {% if can_add_member %}
+      <a class="club-pill club-pill-primary" href="{% url 'admin:auth_user_add' %}">新建成员账号</a>
+    {% endif %}
+  </header>
+{% endblock %}
+
+{% block sidebar %}
+  <aside id="content-related" aria-labelledby="club-recent-title">
+    <div class="module" id="recent-actions-module">
+      <h2 id="club-recent-title">最近操作</h2>
+      {% get_admin_log 10 as admin_log for_user user %}
+      {% if admin_log %}
+        <ul class="actionlist">
+          {% for entry in admin_log %}
+            <li>
+              {% if entry.is_deletion or not entry.get_admin_url %}
+                <span>{{ entry.object_repr }}</span>
+              {% else %}
+                <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
+              {% endif %}
+              <time datetime="{{ entry.action_time|date:'c' }}">{{ entry.action_time|date:"m-d H:i" }}</time>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>暂无操作记录</p>
+      {% endif %}
+    </div>
+  </aside>
+{% endblock %}
+
+{% block content %}
+  <div id="content-main">
+    {% if club_metrics %}
+      <div class="club-metrics" aria-label="平台数据">
+        {% for metric in club_metrics %}
+          <section class="club-metric club-metric-{{ metric.kind }}">
+            <h2>{{ metric.title }}</h2>
+            <p class="club-metric-value">{{ metric.value }}</p>
+            <a class="club-pill" href="{{ metric.url }}">{{ metric.action }}</a>
+          </section>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if app_list %}
+      <details class="club-management" {% if not club_metrics %}open{% endif %}>
+        <summary>全部管理功能</summary>
+        {% include "admin/app_list.html" with show_changelinks=True %}
+      </details>
+    {% endif %}
+  </div>
+{% endblock %}
