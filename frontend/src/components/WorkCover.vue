@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Clapperboard, Code2, Presentation } from '@lucide/vue'
+import { Clapperboard, Code2, FileText, Music2, Presentation } from '@lucide/vue'
 import type { Cover, WorkKind } from '../works'
 
 defineProps<{ cover?: Cover; kind: WorkKind }>()
-const icons = { slides: Presentation, video: Clapperboard, source: Code2 }
+const icons = { slides: Presentation, pdf: FileText, video: Clapperboard, audio: Music2, source: Code2 }
 </script>
 
 <template>

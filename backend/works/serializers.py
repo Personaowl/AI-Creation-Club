@@ -13,7 +13,7 @@ class AssetSerializer(serializers.ModelSerializer):
 class WorkWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Work
-        fields = ("title", "description")
+        fields = ("title", "description", "competition_name", "team_name", "team_members")
 
 
 class WorkSerializer(serializers.ModelSerializer):
@@ -26,7 +26,7 @@ class WorkSerializer(serializers.ModelSerializer):
     class Meta:
         model = Work
         fields = (
-            "id", "title", "description", "status", "is_visible", "assets",
+            "id", "title", "description", "competition_name", "team_name", "team_members", "status", "is_visible", "assets",
             "created_at", "updated_at", "is_mine", "can_edit", "can_download", "review_note",
         )
 

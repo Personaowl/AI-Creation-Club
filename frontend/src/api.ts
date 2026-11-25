@@ -1,4 +1,4 @@
-import type { Asset, Work } from './works'
+import type { Asset, Work, WorkDetails } from './works'
 
 export interface Account {
   id: number
@@ -61,10 +61,10 @@ export const changePassword = (current_password: string, password: string) =>
   authenticate('password', 'POST', { current_password, password })
 
 export const readWorks = (scope: 'gallery' | 'mine') => request<Work[]>('works/?scope=' + scope)
-export const createWork = (title: string, description: string) => request<Work>('works/', 'POST', { title, description })
-export const updateWork = (id: string, title: string, description: string) =>
-  request<Work>('works/' + id + '/', 'PATCH', { title, description })
+export const createWork = (details: WorkDetails) => request<Work>('works/', 'POST', details)
+export const updateWork = (id: string, details: WorkDetails) => request<Work>('works/' + id + '/', 'PATCH', details)
 export const submitWork = (id: string) => request<Work>('works/' + id + '/submit/', 'POST')
+export const withdrawWork = (id: string) => request<Work>('works/' + id + '/withdraw/', 'POST')
 
 export function uploadAsset(id: string, file: File) {
   const data = new FormData()

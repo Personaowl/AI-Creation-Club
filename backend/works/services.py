@@ -78,6 +78,18 @@ def submit_work(user, work_id):
 
 
 @transaction.atomic
+def withdraw_work(user, work_id):
+    work = lock_work(work_id)
+    if not active(user) or work.owner_id != user.pk:
+        raise PermissionDenied("只有作品作者可以撤回投稿。")
+    if work.status != Work.Status.PENDING:
+        raise ValidationError({"detail": "只有待审核的投稿可以撤回。"})
+    work.status = Work.Status.DRAFT
+    work.save(update_fields=["status", "updated_at"])
+    return work
+
+
+@transaction.atomic
 def review_work(user, work_id, decision, note=""):
     require_reviewer(user)
     work = lock_work(work_id)

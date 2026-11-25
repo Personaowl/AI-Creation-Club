@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { X } from '@lucide/vue'
 
-defineProps<{ title: string; labelledby: string; description?: string; wide?: boolean }>()
+defineProps<{ title: string; labelledby: string; description?: string; wide?: boolean; expanded?: boolean; closeLabel?: string }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
 
@@ -26,7 +26,7 @@ function closeOnBackdrop(event: PointerEvent) {
     <dialog
       ref="dialog"
       class="glass-dialog"
-      :class="{ 'dialog-wide': wide }"
+      :class="{ 'dialog-wide': wide, 'dialog-expanded': expanded }"
       :aria-labelledby="labelledby"
       @cancel.prevent="emit('close')"
       @pointerdown="closeOnBackdrop"
@@ -36,7 +36,7 @@ function closeOnBackdrop(event: PointerEvent) {
           <h2 :id="labelledby">{{ title }}</h2>
           <p v-if="description">{{ description }}</p>
         </div>
-        <button class="glass-button icon-button" type="button" aria-label="关闭弹窗" @click="emit('close')">
+        <button class="glass-button icon-button" type="button" :aria-label="closeLabel || '关闭弹窗'" @click="emit('close')">
           <X :size="21" />
         </button>
       </header>

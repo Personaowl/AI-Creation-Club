@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
-  Aperture, ChevronDown, Clapperboard, Code2, Compass, Heart, LayoutGrid, Plus,
-  Presentation, Search, Sparkle, UserRound, X,
+  Aperture, ChevronDown, Clapperboard, Code2, Compass, FileText, FolderOpen, Heart,
+  LayoutGrid, Music2, Plus, Presentation, Search, Sparkle, X,
 } from '@lucide/vue'
 import { readSession, readWorks, signOut } from './api'
 import type { Account } from './api'
 import { brandName, platformName } from './branding'
+import AccountMenu from './components/AccountMenu.vue'
 import LoginPage from './components/LoginPage.vue'
 import PasswordDialog from './components/PasswordDialog.vue'
 import PreviewDialog from './components/PreviewDialog.vue'
@@ -17,12 +18,14 @@ import type { Cover, Work, WorkKind } from './works'
 
 const categories = [
   { id: 'all', label: '全部', icon: LayoutGrid },
-  { id: 'slides', label: '演示文稿', icon: Presentation },
-  { id: 'video', label: '视频', icon: Clapperboard },
-  { id: 'source', label: '源码', icon: Code2 },
+  { id: 'slides', label: kindLabels.slides, icon: Presentation },
+  { id: 'pdf', label: kindLabels.pdf, icon: FileText },
+  { id: 'video', label: kindLabels.video, icon: Clapperboard },
+  { id: 'audio', label: kindLabels.audio, icon: Music2 },
+  { id: 'source', label: kindLabels.source, icon: Code2 },
 ] as const
-const icons = { slides: Presentation, video: Clapperboard, source: Code2 }
-const covers: Record<WorkKind, Cover> = { slides: 'form', video: 'lake', source: 'code' }
+const icons = { slides: Presentation, pdf: FileText, video: Clapperboard, audio: Music2, source: Code2 }
+const covers: Partial<Record<WorkKind, Cover>> = { slides: 'form', video: 'lake', source: 'code' }
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' })
 
 type View = 'library' | 'mine' | 'favorites'
@@ -45,7 +48,6 @@ const draft = ref<Work>()
 const uploadOpen = ref(false)
 const passwordOpen = ref(false)
 const searchInput = ref<HTMLInputElement>()
-const menu = ref<HTMLDetailsElement>()
 const featured = computed(() => records.value[0])
 const galleryTitle = computed(() => ({ library: '全部作品', mine: '我的投稿', favorites: '我的收藏' })[view.value])
 let refreshNumber = 0
@@ -69,7 +71,8 @@ const shownWorks = computed(() => {
   return source.filter(work =>
     (view.value !== 'favorites' || favorites.value.includes(work.id)) &&
     (category.value === 'all' || work.assets.some(asset => asset.kind === category.value)) &&
-    (!keyword || [work.title, work.description, ...work.assets.map(asset => asset.original_name)].some(value => value.toLocaleLowerCase().includes(keyword))),
+    (!keyword || [work.title, work.description, work.competition_name, work.team_name, ...work.assets.map(asset => asset.original_name)]
+      .some(value => value?.toLocaleLowerCase().includes(keyword))),
   ).sort((a, b) => {
     if (sort.value === 'title') return a.title.localeCompare(b.title, 'zh-CN')
     return sort.value === 'recent' ? b.updated_at.localeCompare(a.updated_at) : a.updated_at.localeCompare(b.updated_at)
@@ -155,20 +158,14 @@ onMounted(() => {
 })
 onBeforeUnmount(() => window.removeEventListener('focus', onFocus))
 
-function closeMenu() {
-  if (menu.value) menu.value.open = false
-}
-
 function showView(nextView: View) {
   view.value = nextView
   category.value = 'all'
   search.value = ''
-  closeMenu()
   window.scrollTo({ top: 0, behavior: 'instant' })
 }
 
 async function logout() {
-  closeMenu()
   try {
     await signOut()
     clearAccount()
@@ -208,6 +205,13 @@ function onSaved(work: Work) {
   feedback.value = work.status === 'pending' ? '作品已提交审核。' : '作品已保存为草稿。'
   void refresh()
 }
+
+function onWithdrawn(work: Work) {
+  mine.value = mine.value.map(item => item.id === work.id ? work : item)
+  if (preview.value?.id === work.id) preview.value = work
+  feedback.value = '投稿已撤回，作品已回到草稿。'
+  void refresh()
+}
 </script>
 
 <template>
@@ -231,21 +235,17 @@ function onSaved(work: Work) {
           <button class="nav-item" :class="{ active: view === 'favorites' }" type="button" :aria-current="view === 'favorites' ? 'page' : undefined" @click="showView('favorites')">
             <Heart :size="17" /> <span>我的收藏</span>
           </button>
+          <button class="nav-item" :class="{ active: view === 'mine' }" type="button" :aria-current="view === 'mine' ? 'page' : undefined" @click="showView('mine')">
+            <FolderOpen :size="17" /> <span>我的投稿</span>
+          </button>
         </nav>
         <div class="header-end">
           <button class="primary-button header-action" type="button" aria-label="上传作品" @click="openUpload()">
-            <Plus :size="19" /> <span>上传作品</span>
+            <Plus :size="19" aria-hidden="true" />
+            <span class="header-action-label">上传作品</span>
+            <span class="header-action-compact">上传</span>
           </button>
-          <details ref="menu" class="account-menu">
-            <summary class="glass-button icon-button" aria-label="账号菜单"><UserRound :size="19" /></summary>
-            <div class="account-actions glass-panel">
-              <span class="account-name">{{ account.username }}</span>
-              <button type="button" @click="showView('mine')">我的投稿</button>
-              <a v-if="account.is_admin" href="/admin/">管理后台</a>
-              <button type="button" @click="closeMenu(); passwordOpen = true">修改密码</button>
-              <button type="button" @click="logout">退出登录</button>
-            </div>
-          </details>
+          <AccountMenu :account="account" @change-password="passwordOpen = true" @logout="logout" />
         </div>
       </header>
 
@@ -257,7 +257,7 @@ function onSaved(work: Work) {
               <span class="hero-brand-name">{{ brandName }}</span>
               <span class="hero-platform-type">作品平台</span>
             </h1>
-            <p>浏览竞赛演示文稿、视频与源码项目。</p>
+            <p>浏览竞赛演示文稿、文档、音视频与源码项目。</p>
             <a class="glass-button hero-action" href="#gallery"><LayoutGrid :size="16" aria-hidden="true" /> 浏览作品</a>
           </div>
           <div class="hero-art">
@@ -348,6 +348,7 @@ function onSaved(work: Work) {
     <PreviewDialog
       v-if="preview" :key="preview.id" :work="preview" :favorite="favorites.includes(preview.id)"
       @close="preview = undefined" @toggle-favorite="toggleFavorite(preview.id)" @edit="openUpload(preview)"
+      @withdrawn="onWithdrawn" @refresh="refresh"
     />
   </template>
 </template>

@@ -15,6 +15,9 @@ class Work(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="works")
     title = models.CharField("作品名称", max_length=120)
     description = models.TextField("作品简介", max_length=3000, blank=True)
+    competition_name = models.CharField("比赛名称", max_length=120, blank=True)
+    team_name = models.CharField("团队名称", max_length=120, blank=True)
+    team_members = models.TextField("团队成员", max_length=600, blank=True)
     status = models.CharField("审核状态", max_length=10, choices=Status.choices, default=Status.DRAFT)
     is_visible = models.BooleanField("上架展示", default=False)
     allow_download = models.BooleanField("允许成员下载原件", default=False)
@@ -49,7 +52,9 @@ def work_file_path(asset, filename):
 class Asset(models.Model):
     class Kind(models.TextChoices):
         SLIDES = "slides", "演示文稿"
+        PDF = "pdf", "PDF 文档"
         VIDEO = "video", "视频"
+        AUDIO = "audio", "音频"
         SOURCE = "source", "源码附件"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

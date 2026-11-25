@@ -1,4 +1,4 @@
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_GET
@@ -10,9 +10,10 @@ from rest_framework.response import Response
 from accounts.views import IsAdministrator
 
 from . import services
-from .files import file_response, private_response, video_response
+from .files import file_response, media_response, open_asset, private_response
 from .models import Asset, Work
 from .office import OfficeUnavailable, preview_config
+from .pdf_preview import render_pdf_page
 from .policies import can_download_work, can_view_work
 from .serializers import AccessSerializer, AssetSerializer, ReviewSerializer, WorkSerializer, WorkWriteSerializer
 
@@ -97,6 +98,12 @@ def submit(request, work_id):
 
 
 @api_view(["POST"])
+def withdraw(request, work_id):
+    visible_work(request, work_id)
+    return Response(work_data(request, services.withdraw_work(request.user, work_id)))
+
+
+@api_view(["POST"])
 @permission_classes([IsAdministrator])
 def review(request, work_id):
     payload = ReviewSerializer(data=request.data)
@@ -121,11 +128,26 @@ def download(request, work_id, asset_id):
 
 
 @api_view(["GET"])
-def video(request, work_id, asset_id):
+def media(request, work_id, asset_id, kind):
     asset = visible_asset(request, work_id, asset_id)
-    if asset.kind != Asset.Kind.VIDEO:
+    if asset.kind != kind:
         raise NotFound()
-    return video_response(asset, request.headers.get("Range"))
+    return media_response(asset, request.headers.get("Range"))
+
+
+@api_view(["GET"])
+def pdf_page(request, work_id, asset_id, page):
+    asset = visible_asset(request, work_id, asset_id)
+    if asset.kind != Asset.Kind.PDF:
+        raise NotFound()
+    with open_asset(asset) as source:
+        result = render_pdf_page(source, page)
+    if result is None:
+        raise NotFound("PDF 页面无法读取或不存在。")
+    image, count = result
+    response = HttpResponse(image, content_type="image/png")
+    response["X-Page-Count"] = str(count)
+    return private_response(response)
 
 
 @api_view(["GET"])

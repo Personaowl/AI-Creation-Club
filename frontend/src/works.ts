@@ -1,4 +1,4 @@
-export type WorkKind = 'slides' | 'video' | 'source'
+export type WorkKind = 'slides' | 'pdf' | 'video' | 'audio' | 'source'
 export type Cover = 'form' | 'lake' | 'code' | 'architecture'
 export type WorkStatus = 'draft' | 'pending' | 'approved' | 'rejected'
 
@@ -10,10 +10,16 @@ export interface Asset {
   size: number
 }
 
-export interface Work {
-  id: string
+export interface WorkDetails {
   title: string
   description: string
+  competition_name: string
+  team_name: string
+  team_members: string
+}
+
+export interface Work extends WorkDetails {
+  id: string
   status: WorkStatus
   is_visible: boolean
   assets: Asset[]
@@ -25,11 +31,15 @@ export interface Work {
   review_note: string
 }
 
-export const kindLabels: Record<WorkKind, string> = { slides: '演示文稿', video: '视频', source: '源码' }
+export const kindLabels: Record<WorkKind, string> = { slides: '演示文稿', pdf: 'PDF', video: '视频', audio: '音频', source: '源码' }
 export const statusLabels: Record<WorkStatus, string> = { draft: '草稿', pending: '待审核', approved: '已通过', rejected: '已退回' }
-export const fileKinds: Record<string, WorkKind> = { ppt: 'slides', pptx: 'slides', mp4: 'video', webm: 'video', zip: 'source' }
+export const fileKinds: Record<string, WorkKind> = {
+  ppt: 'slides', pptx: 'slides', pdf: 'pdf', mp4: 'video', webm: 'video', mp3: 'audio', zip: 'source',
+}
+export const fileExtensions = Object.keys(fileKinds)
+export const fileFormatLabels = fileExtensions.map(ext => ext === 'webm' ? 'WebM' : ext.toUpperCase()).join('、')
 
-export function assetPath(work: Work, asset: Asset, action: 'video' | 'viewer' | 'download'): string {
+export function assetPath(work: Work, asset: Asset, action: 'video' | 'audio' | 'pdf' | 'viewer' | 'download'): string {
   return '/api/works/' + work.id + '/assets/' + asset.id + '/' + action + '/'
 }
 

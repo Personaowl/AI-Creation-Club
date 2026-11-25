@@ -2,3 +2,5 @@ Django==5.2.19
 djangorestframework==3.18.3
 mysqlclient==2.3.2
 PyJWT==2.15.1
+pypdfium2==5.15.2
+Pillow==13.0.0

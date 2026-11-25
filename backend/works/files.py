@@ -7,22 +7,42 @@ from django.http import FileResponse, Http404, HttpResponse, StreamingHttpRespon
 from rest_framework import serializers
 
 from .models import Asset
+from .pdf_preview import is_readable_pdf
 
 FORMATS = {
     "ppt": (Asset.Kind.SLIDES, "application/vnd.ms-powerpoint"),
     "pptx": (Asset.Kind.SLIDES, "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+    "pdf": (Asset.Kind.PDF, "application/pdf"),
     "mp4": (Asset.Kind.VIDEO, "video/mp4"),
     "webm": (Asset.Kind.VIDEO, "video/webm"),
+    "mp3": (Asset.Kind.AUDIO, "audio/mpeg"),
     "zip": (Asset.Kind.SOURCE, "application/zip"),
 }
 BYTE_RANGE = re.compile(r"bytes=(\d{0,18})-(\d{0,18})")
 CHUNK_SIZE = 128 * 1024
 
 
+def has_mp3_frame(upload, head):
+    if head.startswith(b"ID3"):
+        if len(head) < 10 or head[3] not in (2, 3, 4) or any(byte >= 128 for byte in head[6:10]):
+            return False
+        # Each ID3 size byte contributes seven bits.
+        tag_size = sum(byte << shift for byte, shift in zip(head[6:10], (21, 14, 7, 0)))
+        audio_start = 10 + tag_size + (10 if head[3] == 4 and head[5] & 0x10 else 0)
+        upload.seek(audio_start)
+        head = upload.read(4)
+
+    return (
+        len(head) >= 4 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0
+        and (head[1] & 0x18) != 0x08 and (head[1] & 0x06) == 0x02
+        and (head[2] & 0xF0) != 0xF0 and (head[2] & 0x0C) != 0x0C
+    )
+
+
 def validate_upload(upload):
     extension = PurePath(upload.name).suffix.lower().lstrip(".")
     if extension not in FORMATS:
-        raise serializers.ValidationError({"file": "支持 PPT、PPTX、MP4、WebM 或 ZIP。"})
+        raise serializers.ValidationError({"file": "支持 PPT、PPTX、PDF、MP4、WebM、MP3 或 ZIP。"})
     if not 0 < upload.size <= settings.UPLOAD_MAX_BYTES:
         raise serializers.ValidationError({"file": "文件为空或超过上传大小限制。"})
 
@@ -31,10 +51,17 @@ def validate_upload(upload):
         valid = False
         if extension == "ppt":
             valid = head.startswith(bytes.fromhex("D0CF11E0A1B11AE1"))
+        elif extension == "pdf" and head.startswith(b"%PDF-"):
+            upload.seek(0)
+            if not is_readable_pdf(upload):
+                raise serializers.ValidationError({"file": "PDF 无法读取，请上传未加密且包含页面的 PDF。"})
+            valid = True
         elif extension == "mp4":
             valid = head[4:8] == b"ftyp"
         elif extension == "webm":
             valid = head.startswith(bytes.fromhex("1A45DFA3"))
+        elif extension == "mp3":
+            valid = has_mp3_frame(upload, head)
         elif extension == "zip":
             valid = zipfile.is_zipfile(upload)
         elif extension == "pptx":
@@ -107,7 +134,7 @@ class FileSlice:
         self.file.close()
 
 
-def video_response(asset, range_header):
+def media_response(asset, range_header):
     if not range_header:
         response = file_response(asset)
         response["Accept-Ranges"] = "bytes"

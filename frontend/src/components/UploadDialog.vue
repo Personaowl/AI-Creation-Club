@@ -3,13 +3,16 @@ import { ref } from 'vue'
 import { Trash2, UploadCloud } from '@lucide/vue'
 import GlassDialog from './GlassDialog.vue'
 import { createWork, deleteAsset, submitWork, updateWork, uploadAsset } from '../api'
-import { fileExtension, fileKinds, fileSize } from '../works'
+import { fileExtension, fileExtensions, fileFormatLabels, fileKinds, fileSize } from '../works'
 import type { Asset, Work } from '../works'
 
 const props = defineProps<{ work?: Work }>()
 const emit = defineEmits<{ close: []; saved: [work: Work] }>()
 const title = ref(props.work?.title ?? '')
 const description = ref(props.work?.description ?? '')
+const competitionName = ref(props.work?.competition_name ?? '')
+const teamName = ref(props.work?.team_name ?? '')
+const teamMembers = ref(props.work?.team_members ?? '')
 const draft = ref(props.work)
 const files = ref<File[]>([])
 const dragDepth = ref(0)
@@ -21,7 +24,7 @@ function pick(selection?: FileList | null) {
   errorMessage.value = ''
   const picked = Array.from(selection)
   if (picked.some(file => !Object.hasOwn(fileKinds, fileExtension(file.name)) || file.size === 0)) {
-    errorMessage.value = '请选择有效的 PPT、PPTX、MP4、WebM 或 ZIP 文件。'
+    errorMessage.value = `请选择非空且受支持的文件（${fileFormatLabels}）。`
     return
   }
   files.value.push(...picked)
@@ -57,9 +60,16 @@ async function save(sendForReview: boolean) {
   }
   saving.value = true
   try {
+    const details = {
+      title: title.value.trim(),
+      description: description.value.trim(),
+      competition_name: competitionName.value.trim(),
+      team_name: teamName.value.trim(),
+      team_members: teamMembers.value.trim(),
+    }
     draft.value = draft.value
-      ? await updateWork(draft.value.id, title.value.trim(), description.value.trim())
-      : await createWork(title.value.trim(), description.value.trim())
+      ? await updateWork(draft.value.id, details)
+      : await createWork(details)
     while (files.value.length) {
       const asset = await uploadAsset(draft.value.id, files.value[0])
       draft.value.assets.push(asset)
@@ -79,18 +89,32 @@ async function save(sendForReview: boolean) {
   <GlassDialog
     :title="props.work ? '编辑作品' : '上传作品'"
     labelledby="upload-heading"
-    description="把同一件作品的演示文稿、视频和源码添加为附件，然后提交审核。"
+    description="把同一件作品的文件作为附件添加，再一起提交审核。"
     @close="!saving && emit('close')"
   >
     <form class="upload-form" @submit.prevent="save(true)">
       <label class="form-field">
-        <span>作品名称</span>
+        <span>作品名称 <small>必填</small></span>
         <input v-model="title" maxlength="120" required :disabled="saving" placeholder="输入竞赛作品名称">
       </label>
       <label class="form-field">
         <span>作品简介 <small>选填</small></span>
         <textarea v-model="description" maxlength="3000" rows="3" :disabled="saving" placeholder="简单介绍作品" />
       </label>
+      <div class="upload-work-details">
+        <label class="form-field">
+          <span>比赛名称 <small>选填</small></span>
+          <input v-model="competitionName" maxlength="120" :disabled="saving">
+        </label>
+        <label class="form-field">
+          <span>团队名称 <small>选填</small></span>
+          <input v-model="teamName" maxlength="120" :disabled="saving">
+        </label>
+        <label class="form-field upload-team-members">
+          <span>团队成员 <small>选填</small></span>
+          <textarea v-model="teamMembers" maxlength="600" rows="2" :disabled="saving" placeholder="多人可用顿号或换行分隔" />
+        </label>
+      </div>
       <div
         class="drop-zone"
         :class="{ 'drop-active': dragDepth > 0 }"
@@ -99,10 +123,10 @@ async function save(sendForReview: boolean) {
         @dragleave.prevent="dragDepth = Math.max(0, dragDepth - 1)"
         @drop.prevent="dragDepth = 0; if (!saving) pick($event.dataTransfer?.files)"
       >
-        <input type="file" accept=".ppt,.pptx,.mp4,.webm,.zip" multiple aria-label="选择作品附件" :disabled="saving" @change="onInput">
+        <input type="file" :accept="fileExtensions.map(ext => '.' + ext).join(',')" multiple aria-label="选择作品附件" :disabled="saving" @change="onInput">
         <span class="upload-icon"><UploadCloud :size="24" /></span>
         <strong>拖入文件，或点击选择</strong>
-        <small>PPT、PPTX、MP4、WebM、ZIP</small>
+        <small>{{ fileFormatLabels }}</small>
       </div>
       <ul v-if="draft?.assets.length || files.length" class="upload-attachments">
         <li v-for="asset in draft?.assets" :key="asset.id">

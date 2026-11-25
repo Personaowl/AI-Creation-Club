@@ -51,6 +51,10 @@ class AssetInline(admin.TabularInline):
         original = reverse("asset_download", args=args)
         if asset.kind == Asset.Kind.SLIDES:
             return format_html('<a href="{}">在线浏览 PPT</a> · <a href="{}">下载原件</a>', reverse("office_viewer", args=args), original)
+        if asset.kind == Asset.Kind.PDF:
+            return format_html('<a href="{}">查看 PDF 首页</a> · <a href="{}">下载原件</a>', reverse("asset_pdf_page", args=[*args, 1]), original)
+        if asset.kind == Asset.Kind.AUDIO:
+            return format_html('<a href="{}">试听音频</a> · <a href="{}">下载原件</a>', reverse("asset_audio", args=args), original)
         return format_html('<a href="{}">下载原件</a>', original)
 
 
@@ -81,9 +85,12 @@ class WorkAdmin(admin.ModelAdmin):
     form = WorkReviewForm
     list_display = ("title", "display_owner", "status", "is_visible", "allow_download", "updated_at")
     list_filter = ("status", "is_visible", "allow_download")
-    search_fields = ("title", "owner__username")
+    search_fields = ("title", "competition_name", "team_name", "owner__username")
     list_select_related = ("owner",)
-    readonly_fields = ("title", "owner", "description", "status", "review_note", "created_at", "updated_at")
+    readonly_fields = (
+        "title", "owner", "description", "competition_name", "team_name", "team_members",
+        "status", "review_note", "created_at", "updated_at",
+    )
     fieldsets = (
         ("作品信息", {"fields": readonly_fields}),
         ("审核", {"fields": ("decision", "note")}),
