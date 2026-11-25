@@ -1,4 +1,5 @@
 from io import StringIO
+import re
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -51,3 +52,47 @@ class AccountTests(TestCase):
             call_command("bootstrap_admin", username="initial-admin", no_input=True, stdout=StringIO())
         entry = User.objects.get(username="initial-admin")
         self.assertTrue(entry.is_staff and entry.is_superuser and entry.check_password("bootstrap-Admin-19$"))
+
+    def test_bootstrap_generates_eight_character_password(self):
+        output = StringIO()
+        with patch.dict("os.environ", {"ENTRYSTAGE_ADMIN_PASSWORD": ""}):
+            call_command("bootstrap_admin", username="initial-admin", no_input=True, stdout=output)
+        password = re.search(r"Initial password: ([A-Za-z0-9]{8})\b", output.getvalue())
+        self.assertIsNotNone(password)
+        self.assertTrue(User.objects.get(username="initial-admin").check_password(password.group(1)))
+
+    def test_reissue_member_activates_only_reclaimed_accounts(self):
+        self.client.force_login(self.admin)
+        browser = Client()
+        browser.force_login(self.member)
+        endpoint = f"/api/auth/members/{self.member.pk}/"
+        self.assertEqual(browser.post(endpoint + "reissue/").status_code, 403)
+        self.assertEqual(self.client.post(endpoint + "reissue/").status_code, 400)
+        self.assertEqual(self.client.post(endpoint + "reclaim/").status_code, 200)
+        self.assertIsNone(browser.get("/api/auth/session/").json()["user"])
+        response = self.client.post(endpoint + "reissue/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        restored = response.json()["initial_password"]
+        self.assertRegex(restored, r"^[A-Za-z0-9]{8}$")
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.is_active and self.member.check_password(restored))
+        self.assertEqual(self.client.post(f"/api/auth/members/{self.admin.pk}/reissue/").status_code, 404)
+
+    def test_members_api_generates_password_when_omitted(self):
+        self.client.force_login(self.admin)
+        response = self.client.post("/api/auth/members/", {"username": "entrant"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        password = response.json()["initial_password"]
+        self.assertRegex(password, r"^[A-Za-z0-9]{8}$")
+        member = User.objects.get(username="entrant")
+        self.assertTrue(member.check_password(password))
+        self.assertNotIn("initial_password", self.client.get("/api/auth/members/").json()[0])
+
+        reset = self.client.post(f"/api/auth/members/{member.pk}/reset-password/", {})
+        self.assertEqual(reset.status_code, 200)
+        updated = reset.json()["initial_password"]
+        self.assertRegex(updated, r"^[A-Za-z0-9]{8}$")
+        member.refresh_from_db()
+        self.assertTrue(member.check_password(updated))

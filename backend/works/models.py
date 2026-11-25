@@ -4,6 +4,14 @@ from django.conf import settings
 from django.db import models
 
 
+class Competition(models.Model):
+    name = models.CharField("比赛名称", max_length=120)
+    name_key = models.CharField(max_length=360, unique=True, editable=False)
+
+    class Meta:
+        ordering = ["name", "id"]
+
+
 class Work(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "草稿"
@@ -13,9 +21,11 @@ class Work(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="works")
+    revision_of = models.OneToOneField("self", null=True, blank=True, on_delete=models.CASCADE, related_name="revision")
     title = models.CharField("作品名称", max_length=120)
     description = models.TextField("作品简介", max_length=3000, blank=True)
     competition_name = models.CharField("比赛名称", max_length=120, blank=True)
+    competition = models.ForeignKey(Competition, null=True, blank=True, on_delete=models.PROTECT, related_name="works")
     team_name = models.CharField("团队名称", max_length=120, blank=True)
     team_members = models.TextField("团队成员", max_length=600, blank=True)
     status = models.CharField("审核状态", max_length=10, choices=Status.choices, default=Status.DRAFT)
@@ -32,7 +42,11 @@ class Work(models.Model):
             models.CheckConstraint(
                 condition=models.Q(status="approved") | models.Q(is_visible=False, allow_download=False),
                 name="work_access_requires_approval",
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(revision_of__isnull=True) | ~models.Q(status="approved"),
+                name="revision_approval_updates_original",
+            ),
         ]
         verbose_name = "竞赛作品"
         verbose_name_plural = "竞赛作品"
@@ -80,6 +94,7 @@ class Review(models.Model):
     reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     decision = models.CharField(max_length=10, choices=Work.Status.choices)
     note = models.TextField(blank=True, max_length=1000)
+    is_revision = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -99,3 +114,14 @@ class AccessChange(models.Model):
         ordering = ["-created_at"]
         verbose_name = "作品权限记录"
         verbose_name_plural = "作品权限记录"
+
+
+class WorkComment(models.Model):
+    work = models.ForeignKey(Work, on_delete=models.CASCADE, related_name="comments")
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    body = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]
+        indexes = [models.Index(fields=["work", "-id"])]

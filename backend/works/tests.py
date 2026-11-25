@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 
-from .models import AccessChange, Asset, Work
+from .models import AccessChange, Asset, Work, WorkComment
 
 User = get_user_model()
 DOCS_ORIGIN = "http://docs.example.test"
@@ -65,6 +65,150 @@ class WorkTests(TestCase):
         self.assertEqual(self.viewer.get(f"/api/works/{work}/").status_code, 404)
         response = self.client.patch(f"/api/manage/works/{work}/access/", {"is_visible": True, "allow_download": download}, content_type="application/json")
         self.assertEqual(response.status_code, 200, response.content)
+
+    def test_competitions_are_created_by_admin_and_can_classify_existing_works(self):
+        self.assertEqual(self.author.post("/api/manage/competitions/", {"name": "校赛"}).status_code, 403)
+        self.assertEqual(Client().get("/api/competitions/").status_code, 403)
+        response = self.client.post("/api/manage/competitions/", {"name": " Innovation   Cup "})
+        self.assertEqual(response.status_code, 201)
+        competition = response.json()
+        self.assertEqual(competition["name"], "Innovation Cup")
+        self.assertEqual(self.client.post("/api/manage/competitions/", {"name": "INNOVATION CUP"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/manage/competitions/", {"name": "   "}).status_code, 400)
+        self.assertEqual(self.author.get("/api/competitions/").json(), [competition])
+
+        work = self.draft()
+        link = f"/api/works/{work}/"
+        payload = {"competition": competition["id"], "competition_name": "自定义文本"}
+        response = self.author.patch(link, payload, content_type="application/json")
+        self.assertEqual(response.json()["competition_name"], competition["name"])
+        self.assertEqual(self.author.patch(link, {"competition": competition["id"] + 1}, content_type="application/json").status_code, 400)
+        self.attachment(work, pptx())
+        self.publish(work)
+        self.assertEqual(self.viewer.get(link).json()["competition"], competition["id"])
+
+        access_link = f"/api/manage/works/{work}/access/"
+        response = self.author.patch(access_link, {"competition": None}, content_type="application/json")
+        self.assertEqual(response.status_code, 403)
+        response = self.client.patch(access_link, {"competition": None}, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["competition"])
+        self.assertEqual(response.json()["competition_name"], "")
+        self.assertTrue(response.json()["is_visible"])
+        self.assertEqual(AccessChange.objects.filter(work_id=work).count(), 1)
+
+    def test_comments_follow_publication_and_require_author_or_admin_to_delete(self):
+        work = self.draft()
+        other_work = self.draft("另一件作品")
+        link = f"/api/works/{work}/comments/"
+        self.assertEqual(self.author.get(link).status_code, 404)
+        self.assertEqual(self.author.post(link, {"body": "未上架"}).status_code, 404)
+        self.attachment(work, pptx())
+        self.attachment(other_work, pptx())
+        self.publish(work)
+        self.publish(other_work)
+        self.assertEqual(Client().get(link).status_code, 403)
+        self.assertEqual(Client().post(link, {"body": "匿名"}).status_code, 403)
+        for invalid in ("   ", "字" * 501):
+            self.assertEqual(self.viewer.post(link, {"body": invalid}).status_code, 400)
+
+        response = self.viewer.post(link, {"body": "  一条评论  ", "author": "其他账号"})
+        self.assertEqual(response.status_code, 201)
+        comment = response.json()
+        self.assertEqual(comment["body"], "一条评论")
+        self.assertEqual(comment["author"], self.other.username)
+        self.assertFalse(self.author.get(link).json()["items"][0]["can_delete"])
+        self.assertTrue(self.client.get(link).json()["items"][0]["can_delete"])
+        delete = link + f'{comment["id"]}/'
+        self.assertEqual(self.author.delete(delete).status_code, 403)
+        self.assertEqual(self.client.delete(f'/api/works/{other_work}/comments/{comment["id"]}/').status_code, 404)
+
+        access_link = f"/api/manage/works/{work}/access/"
+        self.client.patch(access_link, {"is_visible": False}, content_type="application/json")
+        self.assertEqual(self.viewer.get(link).status_code, 404)
+        self.assertEqual(self.viewer.delete(delete).status_code, 404)
+        self.assertEqual(self.viewer.post(link, {"body": "已下架"}).status_code, 404)
+        self.client.patch(access_link, {"is_visible": True}, content_type="application/json")
+        self.assertEqual(self.viewer.get(link).json()["items"][0]["id"], comment["id"])
+        self.assertEqual(self.viewer.delete(delete).status_code, 204)
+
+        second = self.author.post(link, {"body": "管理员可以删除"}).json()
+        self.assertEqual(self.client.delete(link + f'{second["id"]}/').status_code, 204)
+
+    def test_comment_pages_use_a_stable_cursor(self):
+        work = Work.objects.create(owner=self.owner, title="分页", status=Work.Status.APPROVED, is_visible=True)
+        WorkComment.objects.bulk_create([
+            WorkComment(work=work, author=self.other, body=str(index)) for index in range(25)
+        ])
+        url = f"/api/works/{work.pk}/comments/"
+        first = self.viewer.get(url).json()
+        self.assertEqual([entry["body"] for entry in first["items"]], [str(index) for index in range(24, 4, -1)])
+        self.viewer.post(url, {"body": "新的评论"})
+        second = self.viewer.get(url, {"before": first["next_before"]}).json()
+        self.assertEqual([entry["body"] for entry in second["items"]], ["4", "3", "2", "1", "0"])
+        self.assertIsNone(second["next_before"])
+        self.assertEqual(self.viewer.get(url, {"before": "invalid"}).status_code, 400)
+
+    def test_published_revision_replaces_content_only_after_approval(self):
+        original = self.draft("上架版本")
+        kept = self.attachment(original, pptx())
+        removed = self.attachment(original, SimpleUploadedFile("旧附件.pdf", sample_pdf()))
+        removed_file = Asset.objects.get(pk=removed).file
+        self.publish(original, download=True)
+        source = f"/api/works/{original}/"
+        self.viewer.post(source + "comments/", {"body": "原有评论"})
+        self.assertEqual(self.viewer.post(source + "revision/").status_code, 403)
+        self.assertEqual(self.author.patch(source, {"title": "绕过审核"}, content_type="application/json").status_code, 403)
+
+        response = self.author.post(source + "revision/")
+        self.assertEqual(response.status_code, 200, response.content)
+        revision = response.json()
+        revision_link = f'/api/works/{revision["id"]}/'
+        self.assertEqual(revision["revision_of"], original)
+        self.assertEqual(revision["title"], "上架版本")
+        self.assertEqual(self.author.post(source + "revision/").json()["id"], revision["id"])
+        self.assertEqual([entry["id"] for entry in self.author.get("/api/works/?scope=mine").json()], [original])
+        self.assertIsNone(self.viewer.get(source).json()["revision"])
+        self.assertEqual(self.viewer.get(revision_link).status_code, 404)
+
+        cloned_pdf = next(asset["id"] for asset in revision["assets"] if asset["extension"] == "pdf")
+        self.assertNotEqual(cloned_pdf, removed)
+        self.assertEqual(Asset.objects.get(pk=cloned_pdf).file.name, removed_file.name)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.author.delete(revision_link + f"assets/{cloned_pdf}/").status_code, 204)
+        self.assertTrue(removed_file.storage.exists(removed_file.name))
+
+        new_asset = self.attachment(revision["id"], SimpleUploadedFile("新版附件.pdf", sample_pdf()))
+        self.assertEqual(self.author.patch(revision_link, {"title": "修改后版本"}, content_type="application/json").status_code, 200)
+        self.assertEqual(self.author.post(revision_link + "submit/").status_code, 200)
+        self.assertEqual(self.author.get(source).json()["revision"]["status"], Work.Status.PENDING)
+        self.assertEqual(self.client.get("/api/works/?scope=review").json()[0]["id"], revision["id"])
+        self.assertEqual(self.author.post(revision_link + "withdraw/").json()["status"], Work.Status.DRAFT)
+        self.assertEqual(self.author.post(revision_link + "submit/").status_code, 200)
+        self.assertEqual(self.viewer.get(source).json()["title"], "上架版本")
+        self.assertEqual(self.viewer.get(source + f"assets/{removed}/download/").status_code, 200)
+        self.assertEqual(self.viewer.get(revision_link + f"assets/{new_asset}/download/").status_code, 404)
+
+        review = f'/api/manage/works/{revision["id"]}/review/'
+        response = self.client.post(review, {"decision": "rejected", "note": "请补充信息"})
+        self.assertEqual(response.json()["status"], Work.Status.REJECTED)
+        self.assertEqual(self.viewer.get(source).json()["title"], "上架版本")
+        self.assertEqual(self.author.post(revision_link + "submit/").status_code, 200)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(review, {"decision": "approved"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["id"], original)
+        self.assertFalse(removed_file.storage.exists(removed_file.name))
+        self.assertEqual(self.author.get(revision_link).status_code, 404)
+        current = self.viewer.get(source).json()
+        self.assertEqual(current["title"], "修改后版本")
+        self.assertTrue(current["is_visible"])
+        self.assertTrue(current["can_download"])
+        self.assertEqual({asset["id"] for asset in current["assets"]}, {kept, new_asset})
+        self.assertEqual(self.viewer.get(source + f"assets/{new_asset}/download/").status_code, 200)
+        self.assertEqual(self.viewer.get(source + "comments/").json()["items"][0]["body"], "原有评论")
+        self.assertEqual(Work.objects.get(pk=original).reviews.filter(is_revision=True).count(), 2)
+        self.assertNotEqual(self.author.post(source + "revision/").json()["id"], revision["id"])
 
     def test_work_review_display_and_download_are_work_scoped(self):
         self.assertEqual(Client().get("/api/works/").status_code, 403)
@@ -127,7 +271,7 @@ class WorkTests(TestCase):
         self.publish(work)
         published = self.viewer.get(address).json()
         self.assertEqual({name: published[name] for name in details}, details)
-        self.assertContains(self.client.get(f"/admin/works/work/{work}/change/"), details["team_name"])
+        self.assertEqual(self.client.get("/api/works/?scope=all").json()[0]["team_name"], details["team_name"])
 
     def test_only_author_can_withdraw_pending_work_and_resubmit(self):
         work = self.draft()
@@ -232,10 +376,17 @@ class WorkTests(TestCase):
         self.assertEqual(Client().get(relative, **headers).status_code, 404)
         self.assertEqual(self.viewer.get(address + "viewer/").status_code, 404)
 
-    def test_admin_can_open_moderation_and_member_pages(self):
+    def test_management_api_and_legacy_links(self):
         work = self.draft()
         self.attachment(work, pptx())
         self.assertEqual(self.author.post(f"/api/works/{work}/submit/").status_code, 200)
-        self.assertEqual(self.client.get(f"/admin/works/work/{work}/change/").status_code, 200)
-        self.assertEqual(self.client.get("/admin/auth/user/add/").status_code, 200)
+        self.assertEqual(self.viewer.get("/api/works/?scope=all").status_code, 403)
+        managed = self.client.get("/api/works/?scope=all").json()[0]
+        self.assertEqual(managed["owner_username"], self.owner.username)
+        self.assertFalse(managed["allow_download"])
+        self.assertNotIn("owner_username", self.author.get(f"/api/works/{work}/").json())
+        self.assertRedirects(self.client.get(f"/admin/works/work/{work}/change/"), "/#manage/works", fetch_redirect_response=False)
+        self.assertRedirects(self.client.get("/admin/auth/user/add/"), "/#manage/accounts", fetch_redirect_response=False)
+        self.assertRedirects(self.client.get("/admin/auth/group/"), "/#manage", fetch_redirect_response=False)
+        self.assertEqual(self.client.post("/admin/auth/group/add/", {"name": "obsolete"}).status_code, 405)
         self.assertEqual(Work.objects.get(pk=work).status, Work.Status.PENDING)

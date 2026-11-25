@@ -4,13 +4,13 @@ import { Trash2, UploadCloud } from '@lucide/vue'
 import GlassDialog from './GlassDialog.vue'
 import { createWork, deleteAsset, submitWork, updateWork, uploadAsset } from '../api'
 import { fileExtension, fileExtensions, fileFormatLabels, fileKinds, fileSize } from '../works'
-import type { Asset, Work } from '../works'
+import type { Asset, Competition, Work } from '../works'
 
-const props = defineProps<{ work?: Work }>()
+const props = defineProps<{ work?: Work; competitions: Competition[] }>()
 const emit = defineEmits<{ close: []; saved: [work: Work] }>()
 const title = ref(props.work?.title ?? '')
 const description = ref(props.work?.description ?? '')
-const competitionName = ref(props.work?.competition_name ?? '')
+const competition = ref<number | null>(props.work?.competition ?? null)
 const teamName = ref(props.work?.team_name ?? '')
 const teamMembers = ref(props.work?.team_members ?? '')
 const draft = ref(props.work)
@@ -63,7 +63,7 @@ async function save(sendForReview: boolean) {
     const details = {
       title: title.value.trim(),
       description: description.value.trim(),
-      competition_name: competitionName.value.trim(),
+      competition: competition.value,
       team_name: teamName.value.trim(),
       team_members: teamMembers.value.trim(),
     }
@@ -87,9 +87,9 @@ async function save(sendForReview: boolean) {
 
 <template>
   <GlassDialog
-    :title="props.work ? '编辑作品' : '上传作品'"
+    :title="props.work?.revision_of ? '编辑修改稿' : props.work ? '编辑作品' : '上传作品'"
     labelledby="upload-heading"
-    description="把同一件作品的文件作为附件添加，再一起提交审核。"
+    :description="props.work?.revision_of ? '审核通过后，修改会应用到原作品。' : '把同一件作品的文件作为附件添加，再一起提交审核。'"
     @close="!saving && emit('close')"
   >
     <form class="upload-form" @submit.prevent="save(true)">
@@ -103,8 +103,11 @@ async function save(sendForReview: boolean) {
       </label>
       <div class="upload-work-details">
         <label class="form-field">
-          <span>比赛名称 <small>选填</small></span>
-          <input v-model="competitionName" maxlength="120" :disabled="saving">
+          <span>比赛分类 <small>选填</small></span>
+          <select v-model="competition" :disabled="saving">
+            <option :value="null">未分类</option>
+            <option v-for="item in competitions" :key="item.id" :value="item.id">{{ item.name }}</option>
+          </select>
         </label>
         <label class="form-field">
           <span>团队名称 <small>选填</small></span>

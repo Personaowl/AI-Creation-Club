@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import {
   Aperture, ChevronDown, Clapperboard, Code2, Compass, FileText, FolderOpen, Heart,
-  LayoutGrid, Music2, Plus, Presentation, Search, Sparkle, X,
+  LayoutGrid, Moon, Music2, Plus, Presentation, Search, ShieldCheck, Sun, X,
 } from '@lucide/vue'
-import { readSession, readWorks, signOut } from './api'
+import { readCompetitions, readSession, readWork, readWorks, RequestError, signOut } from './api'
 import type { Account } from './api'
 import { brandName, platformName } from './branding'
 import AccountMenu from './components/AccountMenu.vue'
@@ -14,7 +14,7 @@ import PreviewDialog from './components/PreviewDialog.vue'
 import UploadDialog from './components/UploadDialog.vue'
 import WorkCover from './components/WorkCover.vue'
 import { kindLabels, statusLabels } from './works'
-import type { Cover, Work, WorkKind } from './works'
+import type { Competition, Cover, Work, WorkKind } from './works'
 
 const categories = [
   { id: 'all', label: '全部', icon: LayoutGrid },
@@ -27,6 +27,7 @@ const categories = [
 const icons = { slides: Presentation, pdf: FileText, video: Clapperboard, audio: Music2, source: Code2 }
 const covers: Partial<Record<WorkKind, Cover>> = { slides: 'form', video: 'lake', source: 'code' }
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' })
+const ManagementWorkspace = defineAsyncComponent(() => import('./components/ManagementWorkspace.vue'))
 
 type View = 'library' | 'mine' | 'favorites'
 type Category = 'all' | WorkKind
@@ -38,9 +39,11 @@ const loading = ref(false)
 const feedback = ref('')
 const records = ref<Work[]>([])
 const mine = ref<Work[]>([])
+const competitions = ref<Competition[]>([])
 const favorites = ref<string[]>([])
 const view = ref<View>('library')
 const category = ref<Category>('all')
+const competitionFilter = ref<'all' | 'unclassified' | number>('all')
 const search = ref('')
 const sort = ref<'recent' | 'oldest' | 'title'>('recent')
 const preview = ref<Work>()
@@ -48,8 +51,28 @@ const draft = ref<Work>()
 const uploadOpen = ref(false)
 const passwordOpen = ref(false)
 const searchInput = ref<HTMLInputElement>()
-const featured = computed(() => records.value[0])
+const managementMain = ref<HTMLElement>()
+const fragment = ref(window.location.hash)
+const managementSection = computed(() => {
+  if (fragment.value === '#manage') return 'overview'
+  if (fragment.value === '#manage/works') return 'works'
+  if (fragment.value === '#manage/display') return 'display'
+  if (fragment.value === '#manage/competitions') return 'competitions'
+  if (fragment.value === '#manage/accounts') return 'accounts'
+})
+const inManagement = computed(() => Boolean(account.value?.is_admin && managementSection.value))
+const darkManagement = ref(false)
+try {
+  darkManagement.value = (localStorage.getItem('club-management-theme') ?? localStorage.getItem('theme')) === 'dark'
+} catch {
+  // The default theme does not require browser storage.
+}
+watchEffect(() => {
+  if (inManagement.value && darkManagement.value) document.documentElement.dataset.managementTheme = 'dark'
+  else delete document.documentElement.dataset.managementTheme
+})
 const galleryTitle = computed(() => ({ library: '全部作品', mine: '我的投稿', favorites: '我的收藏' })[view.value])
+const hasFilters = computed(() => Boolean(search.value.trim() || category.value !== 'all' || competitionFilter.value !== 'all'))
 let refreshNumber = 0
 
 function favoriteKey(id: number) {
@@ -71,6 +94,7 @@ const shownWorks = computed(() => {
   return source.filter(work =>
     (view.value !== 'favorites' || favorites.value.includes(work.id)) &&
     (category.value === 'all' || work.assets.some(asset => asset.kind === category.value)) &&
+    (competitionFilter.value === 'all' || work.competition === (competitionFilter.value === 'unclassified' ? null : competitionFilter.value)) &&
     (!keyword || [work.title, work.description, work.competition_name, work.team_name, ...work.assets.map(asset => asset.original_name)]
       .some(value => value?.toLocaleLowerCase().includes(keyword))),
   ).sort((a, b) => {
@@ -87,12 +111,28 @@ async function refresh() {
   const number = ++refreshNumber
   loading.value = true
   try {
-    const [gallery, submissions] = await Promise.all([readWorks('gallery'), readWorks('mine')])
+    const [gallery, submissions, groups] = await Promise.all([readWorks('gallery'), readWorks('mine'), readCompetitions()])
     if (number !== refreshNumber) return
     records.value = gallery
     mine.value = submissions
-    if (preview.value) {
-      preview.value = [...gallery, ...submissions].find(work => work.id === preview.value?.id)
+    competitions.value = groups
+    const current = preview.value
+    if (current?.revision_of) {
+      const parent = submissions.find(work => work.id === current.revision_of)
+      if (parent?.revision?.id !== current.id) {
+        preview.value = parent
+      } else {
+        let updated
+        try {
+          updated = await readWork(current.id)
+        } catch (error) {
+          if (!(error instanceof RequestError) || error.status !== 404) throw error
+          updated = await readWork(parent.id)
+        }
+        if (number === refreshNumber && preview.value?.id === current.id) preview.value = updated
+      }
+    } else if (current) {
+      preview.value = [...gallery, ...submissions].find(work => work.id === current.id)
     }
   } catch (error) {
     if (number === refreshNumber) feedback.value = error instanceof Error ? error.message : '无法加载作品。'
@@ -105,6 +145,7 @@ function acceptAccount(user: Account) {
   if (account.value?.id !== user.id) {
     records.value = []
     mine.value = []
+    competitions.value = []
     favorites.value = loadFavorites(user.id)
     showView('library')
   }
@@ -117,6 +158,7 @@ function clearAccount() {
   account.value = null
   records.value = []
   mine.value = []
+  competitions.value = []
   favorites.value = []
   preview.value = undefined
   draft.value = undefined
@@ -146,23 +188,60 @@ async function onFocus() {
     const user = await readSession()
     if (!user) clearAccount()
     else if (user.id !== account.value?.id) acceptAccount(user)
-    else void refresh()
+    else {
+      account.value = user
+      void refresh()
+    }
   } catch {
     // Keep the current view during a temporary network interruption.
+  }
+}
+
+function onHashChange() {
+  fragment.value = window.location.hash
+  if (inManagement.value) window.scrollTo({ top: 0, behavior: 'instant' })
+}
+
+function toggleManagementTheme() {
+  darkManagement.value = !darkManagement.value
+  try {
+    localStorage.setItem('club-management-theme', darkManagement.value ? 'dark' : 'light')
+  } catch {
+    // The theme still works for the current visit.
   }
 }
 
 onMounted(() => {
   void initialize()
   window.addEventListener('focus', onFocus)
+  window.addEventListener('hashchange', onHashChange)
 })
-onBeforeUnmount(() => window.removeEventListener('focus', onFocus))
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', onFocus)
+  window.removeEventListener('hashchange', onHashChange)
+  delete document.documentElement.dataset.managementTheme
+})
 
 function showView(nextView: View) {
+  if (inManagement.value) {
+    window.history.pushState(null, '', window.location.pathname + window.location.search)
+    fragment.value = ''
+  }
   view.value = nextView
-  category.value = 'all'
-  search.value = ''
+  clearFilters()
   window.scrollTo({ top: 0, behavior: 'instant' })
+}
+
+function clearFilters() {
+  category.value = 'all'
+  competitionFilter.value = 'all'
+  search.value = ''
+}
+
+function onCompetitionCreated(item: Competition) {
+  competitions.value = [...competitions.value.filter(group => group.id !== item.id), item]
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  void refresh()
 }
 
 async function logout() {
@@ -196,20 +275,31 @@ function closeUpload() {
   void refresh()
 }
 
+function updateMyWork(work: Work) {
+  if (work.revision_of) {
+    mine.value = mine.value.map(item => item.id === work.revision_of
+      ? { ...item, revision: { id: work.id, status: work.status } }
+      : item)
+  } else {
+    mine.value = [work, ...mine.value.filter(item => item.id !== work.id)]
+  }
+}
+
 function onSaved(work: Work) {
   uploadOpen.value = false
   draft.value = undefined
-  mine.value = [work, ...mine.value.filter(item => item.id !== work.id)]
+  updateMyWork(work)
   showView('mine')
   sort.value = 'recent'
-  feedback.value = work.status === 'pending' ? '作品已提交审核。' : '作品已保存为草稿。'
+  const subject = work.revision_of ? '修改稿' : '作品'
+  feedback.value = subject + (work.status === 'pending' ? '已提交审核。' : '已保存为草稿。')
   void refresh()
 }
 
 function onWithdrawn(work: Work) {
-  mine.value = mine.value.map(item => item.id === work.id ? work : item)
+  updateMyWork(work)
   if (preview.value?.id === work.id) preview.value = work
-  feedback.value = '投稿已撤回，作品已回到草稿。'
+  feedback.value = work.revision_of ? '修改稿已撤回。' : '投稿已撤回，作品已回到草稿。'
   void refresh()
 }
 </script>
@@ -221,26 +311,35 @@ function onWithdrawn(work: Work) {
   <LoginPage v-else-if="!account" :connection-error="connectionError" @signed-in="acceptAccount" @retry="initialize" />
 
   <template v-else>
-    <a href="#gallery" class="skip-link">跳到作品列表</a>
+    <a v-if="inManagement" href="#manage-area" class="skip-link" @click.prevent="managementMain?.focus()">跳到管理内容</a>
+    <a v-else href="#gallery" class="skip-link">跳到作品列表</a>
     <div class="site-shell">
-      <header class="site-header glass-panel glass-refractive">
+      <header class="site-header glass-panel glass-refractive" :class="{ 'site-header-admin': account.is_admin }">
         <a class="brand" href="#" :aria-label="platformName + '首页'" @click.prevent="showView('library')">
           <span class="brand-mark glass-panel"><Aperture :size="21" :stroke-width="1.7" /></span>
           <span class="brand-name">{{ brandName }}</span>
         </a>
         <nav class="main-nav" aria-label="主要导航">
-          <button class="nav-item" :class="{ active: view === 'library' }" type="button" :aria-current="view === 'library' ? 'page' : undefined" @click="showView('library')">
+          <button class="nav-item" :class="{ active: !inManagement && view === 'library' }" type="button" :aria-current="!inManagement && view === 'library' ? 'page' : undefined" @click="showView('library')">
             <Compass :size="17" /> <span>作品库</span>
           </button>
-          <button class="nav-item" :class="{ active: view === 'favorites' }" type="button" :aria-current="view === 'favorites' ? 'page' : undefined" @click="showView('favorites')">
+          <button class="nav-item" :class="{ active: !inManagement && view === 'favorites' }" type="button" :aria-current="!inManagement && view === 'favorites' ? 'page' : undefined" @click="showView('favorites')">
             <Heart :size="17" /> <span>我的收藏</span>
           </button>
-          <button class="nav-item" :class="{ active: view === 'mine' }" type="button" :aria-current="view === 'mine' ? 'page' : undefined" @click="showView('mine')">
+          <button class="nav-item" :class="{ active: !inManagement && view === 'mine' }" type="button" :aria-current="!inManagement && view === 'mine' ? 'page' : undefined" @click="showView('mine')">
             <FolderOpen :size="17" /> <span>我的投稿</span>
           </button>
+          <a v-if="account.is_admin" href="#manage" class="nav-item" :class="{ active: inManagement }" :aria-current="inManagement ? 'page' : undefined">
+            <ShieldCheck :size="17" aria-hidden="true" /> <span>管理后台</span>
+          </a>
         </nav>
         <div class="header-end">
-          <button class="primary-button header-action" type="button" aria-label="上传作品" @click="openUpload()">
+          <button v-if="inManagement" class="glass-button icon-button manage-theme-toggle" type="button"
+            :aria-label="darkManagement ? '切换浅色模式' : '切换深色模式'" @click="toggleManagementTheme">
+            <Sun v-if="darkManagement" :size="19" aria-hidden="true" />
+            <Moon v-else :size="19" aria-hidden="true" />
+          </button>
+          <button v-else class="primary-button header-action" type="button" aria-label="上传作品" @click="openUpload()">
             <Plus :size="19" aria-hidden="true" />
             <span class="header-action-label">上传作品</span>
             <span class="header-action-compact">上传</span>
@@ -249,7 +348,12 @@ function onWithdrawn(work: Work) {
         </div>
       </header>
 
-      <main>
+      <main v-if="inManagement && managementSection" id="manage-area" ref="managementMain" tabindex="-1">
+        <p v-if="feedback" class="site-feedback glass-panel" role="status">{{ feedback }}</p>
+        <ManagementWorkspace :section="managementSection" :competitions="competitions"
+          @work-updated="refresh" @competition-created="onCompetitionCreated" />
+      </main>
+      <main v-else>
         <p v-if="feedback" class="site-feedback glass-panel" role="status">{{ feedback }}</p>
         <section v-if="view === 'library'" class="hero" aria-labelledby="hero-title">
           <div class="hero-copy">
@@ -260,21 +364,12 @@ function onWithdrawn(work: Work) {
             <p>浏览竞赛演示文稿、文档、音视频与源码项目。</p>
             <a class="glass-button hero-action" href="#gallery"><LayoutGrid :size="16" aria-hidden="true" /> 浏览作品</a>
           </div>
-          <div class="hero-art">
-            <button v-if="featured" class="hero-feature glass-panel glass-refractive" type="button" @click="preview = featured">
-              <Sparkle :size="53" :stroke-width="1.45" aria-hidden="true" />
-              <strong>{{ featured.title }}</strong>
-              <span>最新上架</span>
-            </button>
-            <div v-else class="hero-feature glass-panel glass-refractive">
-              <Sparkle :size="53" :stroke-width="1.45" aria-hidden="true" />
-              <span>{{ loading ? '正在加载作品' : '待作品上架' }}</span>
+          <div class="hero-art" aria-hidden="true">
+            <div class="hero-glass-back"></div>
+            <div class="hero-glass-front">
+              <Aperture :size="76" :stroke-width="1.1" focusable="false" />
             </div>
-            <button v-if="featured" type="button" class="floating-favorite glass-panel"
-              :aria-label="(favorites.includes(featured.id) ? '取消收藏' : '收藏') + featured.title"
-              :aria-pressed="favorites.includes(featured.id)" @click="toggleFavorite(featured.id)">
-              <Heart :size="24" :stroke-width="1.65" :class="{ 'heart-filled': favorites.includes(featured.id) }" />
-            </button>
+            <div class="hero-glass-drop"></div>
           </div>
         </section>
 
@@ -299,13 +394,23 @@ function onWithdrawn(work: Work) {
                 <component :is="item.icon" :size="16" :stroke-width="1.9" /> {{ item.label }}
               </button>
             </div>
-            <div class="sort-field glass-panel">
-              <select v-model="sort" aria-label="作品排序">
-                <option value="recent">最近更新</option>
-                <option value="oldest">最早更新</option>
-                <option value="title">按名称</option>
-              </select>
-              <ChevronDown :size="16" aria-hidden="true" />
+            <div class="gallery-selects">
+              <div class="sort-field glass-panel">
+                <select v-model="competitionFilter" aria-label="按比赛分类筛选">
+                  <option value="all">全部比赛</option>
+                  <option v-for="item in competitions" :key="item.id" :value="item.id">{{ item.name }}</option>
+                  <option value="unclassified">未分类</option>
+                </select>
+                <ChevronDown :size="16" aria-hidden="true" />
+              </div>
+              <div class="sort-field glass-panel">
+                <select v-model="sort" aria-label="作品排序">
+                  <option value="recent">最近更新</option>
+                  <option value="oldest">最早更新</option>
+                  <option value="title">按名称</option>
+                </select>
+                <ChevronDown :size="16" aria-hidden="true" />
+              </div>
             </div>
           </div>
 
@@ -320,10 +425,11 @@ function onWithdrawn(work: Work) {
                 </div>
                 <div class="work-copy">
                   <h3>{{ work.title }}</h3>
+                  <span v-if="work.competition_name" class="work-competition">{{ work.competition_name }}</span>
                   <p>{{ work.description || '暂无简介' }}</p>
                   <div class="work-meta">
                     <span>{{ work.assets.length }} 个附件</span>
-                    <span v-if="view === 'mine'">{{ statusLabels[work.status] }}</span>
+                    <span v-if="view === 'mine'">{{ work.revision ? '修改稿 · ' + statusLabels[work.revision.status] : work.is_visible ? '已上架' : statusLabels[work.status] }}</span>
                     <time v-else :datetime="work.updated_at">{{ dateFormat.format(new Date(work.updated_at)) }}</time>
                   </div>
                 </div>
@@ -336,19 +442,19 @@ function onWithdrawn(work: Work) {
           </div>
           <div v-else class="empty-state glass-panel" :aria-busy="loading">
             <component :is="view === 'favorites' ? Heart : Search" :size="28" :stroke-width="1.5" />
-            <h3>{{ loading ? '正在加载作品…' : search || category !== 'all' ? '没有符合条件的作品' : view === 'favorites' ? '还没有收藏作品' : view === 'mine' ? '还没有投稿' : '暂无已上架作品' }}</h3>
-            <button v-if="search || category !== 'all'" class="glass-button" type="button" @click="category = 'all'; search = ''">清除筛选</button>
+            <h3>{{ loading ? '正在加载作品…' : hasFilters ? '没有符合条件的作品' : view === 'favorites' ? '还没有收藏作品' : view === 'mine' ? '还没有投稿' : '暂无已上架作品' }}</h3>
+            <button v-if="hasFilters" class="glass-button" type="button" @click="clearFilters">清除筛选</button>
           </div>
         </section>
       </main>
     </div>
 
-    <UploadDialog v-if="uploadOpen" :work="draft" @close="closeUpload" @saved="onSaved" />
+    <UploadDialog v-if="uploadOpen" :work="draft" :competitions="competitions" @close="closeUpload" @saved="onSaved" />
     <PasswordDialog v-if="passwordOpen" @close="passwordOpen = false" @saved="passwordOpen = false; feedback = '密码已更新。'" />
     <PreviewDialog
       v-if="preview" :key="preview.id" :work="preview" :favorite="favorites.includes(preview.id)"
-      @close="preview = undefined" @toggle-favorite="toggleFavorite(preview.id)" @edit="openUpload(preview)"
-      @withdrawn="onWithdrawn" @refresh="refresh"
+      @close="preview = undefined" @toggle-favorite="toggleFavorite(preview.id)" @edit="openUpload"
+      @view-revision="preview = $event" @withdrawn="onWithdrawn" @refresh="refresh"
     />
   </template>
 </template>

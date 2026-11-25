@@ -1,10 +1,11 @@
-import getpass
 import os
 
 from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
+
+from accounts.services import generate_initial_password
 
 
 class Command(BaseCommand):
@@ -24,17 +25,15 @@ class Command(BaseCommand):
                 return
             raise CommandError("The administrator username belongs to an existing account.")
 
-        password = os.environ.get("ENTRYSTAGE_ADMIN_PASSWORD")
-        if not password:
-            if options["no_input"]:
-                raise CommandError("Set ENTRYSTAGE_ADMIN_PASSWORD or omit --no-input.")
-            password = getpass.getpass("Admin password: ")
-            if password != getpass.getpass("Confirm admin password: "):
-                raise CommandError("Passwords do not match.")
         user = user_model(username=username, is_staff=True, is_superuser=True)
+        password = os.environ.get("ENTRYSTAGE_ADMIN_PASSWORD")
+        generated = not password
         try:
             user.full_clean(exclude=["password"])
-            password_validation.validate_password(password, user)
+            if generated:
+                password = generate_initial_password(user)
+            else:
+                password_validation.validate_password(password, user)
         except ValidationError as error:
             raise CommandError(" ".join(error.messages)) from error
         try:
@@ -44,3 +43,5 @@ class Command(BaseCommand):
         except IntegrityError as error:
             raise CommandError("The administrator username already exists.") from error
         self.stdout.write(self.style.SUCCESS(f"Administrator {username} created."))
+        if generated:
+            self.stdout.write(f"Initial password: {password}")

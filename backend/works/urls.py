@@ -4,8 +4,13 @@ from . import views
 from .models import Asset
 
 urlpatterns = [
+    path("competitions/", views.competition_list),
+    path("manage/competitions/", views.create_competition),
     path("works/", views.work_list),
     path("works/<uuid:work_id>/", views.work_detail),
+    path("works/<uuid:work_id>/revision/", views.start_revision),
+    path("works/<uuid:work_id>/comments/", views.comments),
+    path("works/<uuid:work_id>/comments/<int:comment_id>/", views.delete_comment),
     path("works/<uuid:work_id>/assets/", views.upload),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/", views.delete_asset),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/download/", views.download, name="asset_download"),

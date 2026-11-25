@@ -1,3 +1,6 @@
+from unicodedata import normalize
+
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.clickjacking import xframe_options_sameorigin
@@ -11,19 +14,26 @@ from accounts.views import IsAdministrator
 
 from . import services
 from .files import file_response, media_response, open_asset, private_response
-from .models import Asset, Work
+from .models import Asset, Competition, Work
 from .office import OfficeUnavailable, preview_config
 from .pdf_preview import render_pdf_page
 from .policies import can_download_work, can_view_work
-from .serializers import AccessSerializer, AssetSerializer, ReviewSerializer, WorkSerializer, WorkWriteSerializer
+from .serializers import (
+    AccessSerializer, AssetSerializer, CommentSerializer, CompetitionSerializer, ManagedWorkSerializer,
+    ReviewSerializer, WorkSerializer, WorkWriteSerializer,
+)
 
 
-def work_data(request, work):
-    return WorkSerializer(work, context={"request": request}).data
+COMMENT_PAGE_SIZE = 20
+
+
+def work_data(request, work, managed=False):
+    serializer = ManagedWorkSerializer if managed else WorkSerializer
+    return serializer(work, context={"request": request}).data
 
 
 def visible_work(request, work_id):
-    work = get_object_or_404(Work.objects.prefetch_related("assets"), pk=work_id)
+    work = get_object_or_404(Work.objects.select_related("competition", "revision").prefetch_related("assets"), pk=work_id)
     if not can_view_work(request.user, work):
         raise NotFound()
     return work
@@ -44,22 +54,74 @@ def work_list(request):
         work = payload.save(owner=request.user)
         return Response(work_data(request, work), status=status.HTTP_201_CREATED)
 
-    records = Work.objects.prefetch_related("assets")
-    match request.query_params.get("scope", "gallery"):
+    records = Work.objects.select_related("competition", "revision").prefetch_related("assets")
+    scope = request.query_params.get("scope", "gallery")
+    serializer = WorkSerializer
+    match scope:
         case "gallery":
-            records = records.filter(status=Work.Status.APPROVED, is_visible=True)
+            records = records.filter(status=Work.Status.APPROVED, is_visible=True, revision_of__isnull=True)
         case "mine":
-            records = records.filter(owner=request.user)
-        case "review":
+            records = records.filter(owner=request.user, revision_of__isnull=True)
+        case "review" | "all":
             if not request.user.is_superuser:
                 raise PermissionDenied()
-            records = records.filter(status=Work.Status.PENDING)
-        case "all":
-            if not request.user.is_superuser:
-                raise PermissionDenied()
+            records = records.select_related("owner")
+            serializer = ManagedWorkSerializer
+            if scope == "review":
+                records = records.filter(status=Work.Status.PENDING)
         case _:
             raise serializers.ValidationError({"scope": "未知的作品范围。"})
-    return Response(WorkSerializer(records, many=True, context={"request": request}).data)
+    return Response(serializer(records, many=True, context={"request": request}).data)
+
+
+@api_view(["GET"])
+def competition_list(request):
+    return Response(CompetitionSerializer(Competition.objects.all(), many=True).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAdministrator])
+def create_competition(request):
+    payload = CompetitionSerializer(data=request.data)
+    payload.is_valid(raise_exception=True)
+    name = payload.validated_data["name"]
+    key = normalize("NFC", name.casefold())
+    try:
+        with transaction.atomic():
+            payload.save(name_key=key)
+    except IntegrityError:
+        if Competition.objects.filter(name_key=key).exists():
+            raise serializers.ValidationError({"name": "这个比赛分类已存在。"}) from None
+        raise
+    return Response(payload.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "POST"])
+def comments(request, work_id):
+    context = {"request": request}
+    if request.method == "POST":
+        payload = CommentSerializer(data=request.data, context=context)
+        payload.is_valid(raise_exception=True)
+        comment = services.add_comment(request.user, work_id, payload.validated_data["body"])
+        return private_response(Response(CommentSerializer(comment, context=context).data, status=status.HTTP_201_CREATED))
+
+    work = get_object_or_404(Work, pk=work_id, status=Work.Status.APPROVED, is_visible=True)
+    records = work.comments.select_related("author")
+    if (before := request.query_params.get("before")) is not None:
+        cursor = serializers.IntegerField(min_value=1, max_value=9223372036854775807).run_validation(before)
+        records = records.filter(pk__lt=cursor)
+    results = list(records[:COMMENT_PAGE_SIZE + 1])
+    page = results[:COMMENT_PAGE_SIZE]
+    return private_response(Response({
+        "items": CommentSerializer(page, many=True, context=context).data,
+        "next_before": page[-1].pk if len(results) > COMMENT_PAGE_SIZE else None,
+    }))
+
+
+@api_view(["DELETE"])
+def delete_comment(request, work_id, comment_id):
+    services.delete_comment(request.user, work_id, comment_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(["GET", "PATCH"])
@@ -70,6 +132,12 @@ def work_detail(request, work_id):
         payload.is_valid(raise_exception=True)
         work = services.edit_work(request.user, work.id, **payload.validated_data)
     return Response(work_data(request, work))
+
+
+@api_view(["POST"])
+def start_revision(request, work_id):
+    visible_work(request, work_id)
+    return Response(work_data(request, services.start_revision(request.user, work_id)))
 
 
 @api_view(["POST"])
@@ -108,7 +176,7 @@ def withdraw(request, work_id):
 def review(request, work_id):
     payload = ReviewSerializer(data=request.data)
     payload.is_valid(raise_exception=True)
-    return Response(work_data(request, services.review_work(request.user, work_id, **payload.validated_data)))
+    return Response(work_data(request, services.review_work(request.user, work_id, **payload.validated_data), managed=True))
 
 
 @api_view(["PATCH"])
@@ -116,7 +184,7 @@ def review(request, work_id):
 def access(request, work_id):
     payload = AccessSerializer(data=request.data)
     payload.is_valid(raise_exception=True)
-    return Response(work_data(request, services.change_access(request.user, work_id, **payload.validated_data)))
+    return Response(work_data(request, services.change_access(request.user, work_id, **payload.validated_data), managed=True))
 
 
 @api_view(["GET"])

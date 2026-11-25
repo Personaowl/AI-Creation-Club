@@ -9,7 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 
-from .services import reclaim_member, reset_member, validate_password
+from .services import generate_initial_password, reclaim_member, reissue_member, reset_member, validate_password
 
 User = get_user_model()
 
@@ -28,6 +28,15 @@ class NewPassword(serializers.Serializer):
     password = serializers.CharField(trim_whitespace=False, max_length=256, write_only=True)
 
 
+class NewMember(Credentials):
+    password = serializers.CharField(trim_whitespace=False, max_length=256, write_only=True, required=False)
+
+
+class ResetPassword(NewPassword):
+    password = serializers.CharField(trim_whitespace=False, max_length=256, write_only=True, required=False)
+    reactivate = serializers.BooleanField(default=False)
+
+
 def user_data(user):
     return {
         "id": user.pk,
@@ -35,6 +44,17 @@ def user_data(user):
         "is_admin": user.is_superuser,
         "is_active": user.is_active,
     }
+
+
+def member_data(user):
+    return {**user_data(user), "date_joined": user.date_joined, "last_login": user.last_login}
+
+
+def member_response(user, generated=None, status_code=status.HTTP_200_OK):
+    data = member_data(user)
+    if generated is not None:
+        data["initial_password"] = generated
+    return Response(data, status=status_code, headers={"Cache-Control": "no-store"})
 
 
 def session_data(request, user):
@@ -94,42 +114,57 @@ def change_password(request):
 def members(request):
     if request.method == "GET":
         users = User.objects.filter(is_staff=False, is_superuser=False).order_by("username")
-        return Response([user_data(user) for user in users])
+        return Response([member_data(user) for user in users])
 
-    payload = Credentials(data=request.data)
+    payload = NewMember(data=request.data)
     payload.is_valid(raise_exception=True)
     user = User(username=payload.validated_data["username"])
+    password = payload.validated_data.get("password")
+    generated = None
     try:
-        validate_password(payload.validated_data["password"], user)
+        if password is None:
+            generated = password = generate_initial_password(user)
+        else:
+            validate_password(password, user)
     except DjangoValidationError as error:
         raise serializers.ValidationError({"password": error.messages}) from error
     try:
         with transaction.atomic():
-            user.set_password(payload.validated_data["password"])
+            user.set_password(password)
             user.save()
     except IntegrityError as error:
         raise serializers.ValidationError({"username": "该账号名已存在。"}) from error
-    return Response(user_data(user), status=status.HTTP_201_CREATED)
+    return member_response(user, generated, status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
 @permission_classes([IsAdministrator])
 def reclaim(request, user_id):
     user = get_object_or_404(User, pk=user_id, is_staff=False, is_superuser=False)
-    return Response(user_data(reclaim_member(user)))
+    return member_response(reclaim_member(user))
+
+
+@api_view(["POST"])
+@permission_classes([IsAdministrator])
+def reissue(request, user_id):
+    user = get_object_or_404(User, pk=user_id, is_staff=False, is_superuser=False)
+    try:
+        user, generated = reissue_member(user)
+    except DjangoValidationError as error:
+        raise serializers.ValidationError({"detail": error.messages[0]}) from error
+    if generated is None:
+        raise serializers.ValidationError({"detail": "只有已回收的账号可以重新发放。"})
+    return member_response(user, generated)
 
 
 @api_view(["POST"])
 @permission_classes([IsAdministrator])
 def reset_password(request, user_id):
-    class ResetPassword(NewPassword):
-        reactivate = serializers.BooleanField(default=False)
-
     user = get_object_or_404(User, pk=user_id, is_staff=False, is_superuser=False)
     payload = ResetPassword(data=request.data)
     payload.is_valid(raise_exception=True)
     try:
-        user = reset_member(user, **payload.validated_data)
+        user, generated = reset_member(user, **payload.validated_data)
     except DjangoValidationError as error:
         raise serializers.ValidationError({"password": error.messages}) from error
-    return Response(user_data(user))
+    return member_response(user, generated)

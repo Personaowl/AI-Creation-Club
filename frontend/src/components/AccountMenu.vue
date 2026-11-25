@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, useId } from 'vue'
-import { ChevronDown, KeyRound, LogOut, ShieldCheck, UserRound } from '@lucide/vue'
+import { ChevronDown, KeyRound, LogOut, UserRound } from '@lucide/vue'
 import type { Account } from '../api'
 
 defineProps<{ account: Account }>()
@@ -69,9 +69,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="account-actions">
-        <a v-if="account.is_admin" class="account-action" href="/admin/">
-          <ShieldCheck :size="18" aria-hidden="true" /> 管理后台
-        </a>
         <button class="account-action" type="button" @click="changePassword">
           <KeyRound :size="18" aria-hidden="true" /> 修改密码
         </button>

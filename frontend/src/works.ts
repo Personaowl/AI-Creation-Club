@@ -13,13 +13,16 @@ export interface Asset {
 export interface WorkDetails {
   title: string
   description: string
-  competition_name: string
+  competition: number | null
   team_name: string
   team_members: string
 }
 
 export interface Work extends WorkDetails {
   id: string
+  revision_of: string | null
+  revision: { id: string; status: WorkStatus } | null
+  competition_name: string
   status: WorkStatus
   is_visible: boolean
   assets: Asset[]
@@ -27,8 +30,32 @@ export interface Work extends WorkDetails {
   updated_at: string
   is_mine: boolean
   can_edit: boolean
+  can_revise: boolean
   can_download: boolean
   review_note: string
+}
+
+export interface ManagedWork extends Work {
+  owner_username: string
+  allow_download: boolean
+}
+
+export interface Competition {
+  id: number
+  name: string
+}
+
+export interface WorkComment {
+  id: number
+  author: string
+  body: string
+  created_at: string
+  can_delete: boolean
+}
+
+export interface CommentPage {
+  items: WorkComment[]
+  next_before: number | null
 }
 
 export const kindLabels: Record<WorkKind, string> = { slides: '演示文稿', pdf: 'PDF', video: '视频', audio: '音频', source: '源码' }

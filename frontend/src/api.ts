@@ -1,9 +1,19 @@
-import type { Asset, Work, WorkDetails } from './works'
+import type { Asset, CommentPage, Competition, ManagedWork, Work, WorkComment, WorkDetails } from './works'
 
 export interface Account {
   id: number
   username: string
   is_admin: boolean
+}
+
+export interface MemberAccount extends Account {
+  is_active: boolean
+  date_joined: string
+  last_login: string | null
+}
+
+export interface IssuedMember extends MemberAccount {
+  initial_password: string
 }
 
 interface Session {
@@ -61,8 +71,26 @@ export const changePassword = (current_password: string, password: string) =>
   authenticate('password', 'POST', { current_password, password })
 
 export const readWorks = (scope: 'gallery' | 'mine') => request<Work[]>('works/?scope=' + scope)
+export const readWork = (id: string) => request<Work>(`works/${id}/`)
+export const readManagedWorks = () => request<ManagedWork[]>('works/?scope=all')
+export const reviewWork = (id: string, decision: 'approved' | 'rejected', note: string) =>
+  request<ManagedWork>(`manage/works/${id}/review/`, 'POST', { decision, note })
+export const changeWorkAccess = (id: string, fields: Partial<Pick<ManagedWork, 'is_visible' | 'allow_download' | 'competition'>>) =>
+  request<ManagedWork>(`manage/works/${id}/access/`, 'PATCH', fields)
+export const readCompetitions = () => request<Competition[]>('competitions/')
+export const createCompetition = (name: string) => request<Competition>('manage/competitions/', 'POST', { name })
+export const readComments = (id: string, before?: number) =>
+  request<CommentPage>(`works/${id}/comments/` + (before === undefined ? '' : `?before=${before}`))
+export const addComment = (id: string, body: string) => request<WorkComment>(`works/${id}/comments/`, 'POST', { body })
+export const deleteComment = (workId: string, commentId: number) =>
+  request<void>(`works/${workId}/comments/${commentId}/`, 'DELETE')
+export const readMembers = () => request<MemberAccount[]>('auth/members/')
+export const issueMember = (username: string) => request<IssuedMember>('auth/members/', 'POST', { username })
+export const reclaimMember = (id: number) => request<MemberAccount>(`auth/members/${id}/reclaim/`, 'POST')
+export const reissueMember = (id: number) => request<IssuedMember>(`auth/members/${id}/reissue/`, 'POST')
 export const createWork = (details: WorkDetails) => request<Work>('works/', 'POST', details)
 export const updateWork = (id: string, details: WorkDetails) => request<Work>('works/' + id + '/', 'PATCH', details)
+export const startRevision = (id: string) => request<Work>(`works/${id}/revision/`, 'POST')
 export const submitWork = (id: string) => request<Work>('works/' + id + '/submit/', 'POST')
 export const withdrawWork = (id: string) => request<Work>('works/' + id + '/withdraw/', 'POST')
 

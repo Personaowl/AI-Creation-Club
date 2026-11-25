@@ -32,7 +32,7 @@ async function submit() {
       </label>
       <label class="form-field">
         <span>新密码</span>
-        <input v-model="nextPassword" type="password" autocomplete="new-password" minlength="10" maxlength="256" required>
+        <input v-model="nextPassword" type="password" autocomplete="new-password" minlength="8" maxlength="256" required>
       </label>
       <p v-if="message" class="form-error" role="alert">{{ message }}</p>
       <button class="primary-button" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存密码' }}</button>

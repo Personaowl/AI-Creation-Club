@@ -12,3 +12,7 @@ def can_download_work(user, work):
 
 def can_edit_work(user, work):
     return active(user) and work.owner_id == user.pk and work.status in (work.Status.DRAFT, work.Status.REJECTED)
+
+
+def can_revise_work(user, work):
+    return active(user) and work.owner_id == user.pk and work.status == work.Status.APPROVED and work.revision_of_id is None
