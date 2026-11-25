@@ -9,7 +9,10 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 
-from .services import generate_initial_password, reclaim_member, reissue_member, reset_member, validate_password
+from .services import (
+    clear_issued_password, create_member, read_issued_password, reclaim_member, reissue_member,
+    reset_member, validate_password,
+)
 
 User = get_user_model()
 
@@ -95,16 +98,18 @@ def change_password(request):
 
     payload = PasswordChange(data=request.data)
     payload.is_valid(raise_exception=True)
-    user = request.user
-    if not user.check_password(payload.validated_data["current_password"]):
-        raise serializers.ValidationError({"current_password": "当前密码不正确。"})
     password = payload.validated_data["password"]
-    try:
-        validate_password(password, user)
-    except DjangoValidationError as error:
-        raise serializers.ValidationError({"password": error.messages}) from error
-    user.set_password(password)
-    user.save(update_fields=["password"])
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=request.user.pk)
+        if not user.is_active or not user.check_password(payload.validated_data["current_password"]):
+            raise serializers.ValidationError({"current_password": "当前密码不正确。"})
+        try:
+            validate_password(password, user)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"password": error.messages}) from error
+        user.set_password(password)
+        user.save(update_fields=["password"])
+        clear_issued_password(user)
     update_session_auth_hash(request, user)
     return session_data(request, user)
 
@@ -118,23 +123,20 @@ def members(request):
 
     payload = NewMember(data=request.data)
     payload.is_valid(raise_exception=True)
-    user = User(username=payload.validated_data["username"])
-    password = payload.validated_data.get("password")
-    generated = None
     try:
-        if password is None:
-            generated = password = generate_initial_password(user)
-        else:
-            validate_password(password, user)
+        user, generated = create_member(**payload.validated_data)
     except DjangoValidationError as error:
         raise serializers.ValidationError({"password": error.messages}) from error
-    try:
-        with transaction.atomic():
-            user.set_password(password)
-            user.save()
     except IntegrityError as error:
         raise serializers.ValidationError({"username": "该账号名已存在。"}) from error
     return member_response(user, generated, status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdministrator])
+def member_issued_password(request, user_id):
+    user = get_object_or_404(User, pk=user_id, is_staff=False, is_superuser=False)
+    return Response({"initial_password": read_issued_password(user)}, headers={"Cache-Control": "private, no-store"})
 
 
 @api_view(["POST"])

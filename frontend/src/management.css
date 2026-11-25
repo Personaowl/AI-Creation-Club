@@ -56,6 +56,9 @@
 .manage-identity strong { min-width: 0; }
 .manage-work-context { margin-bottom: 10px; color: var(--muted); font-size: 14px; }
 .manage-member-detail { display: grid; gap: 12px; }
+.manage-member-credential { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--manage-line); border-radius: 14px; background: var(--manage-inner); }
+.manage-credential-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.manage-member-actions { flex-wrap: wrap; }
 .manage-password, .manage-member-times { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px; margin: 0; }
 .manage-password input { width: 100%; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: 13px; background: var(--manage-inner); color: var(--ink); font-family: "Cascadia Code", Consolas, monospace; font-size: 18px; }
 .manage-member-times { grid-template-columns: repeat(2, minmax(0, 1fr)); }

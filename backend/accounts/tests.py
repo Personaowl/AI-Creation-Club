@@ -96,3 +96,51 @@ class AccountTests(TestCase):
         self.assertRegex(updated, r"^[A-Za-z0-9]{8}$")
         member.refresh_from_db()
         self.assertTrue(member.check_password(updated))
+
+    def test_only_admins_can_reopen_current_issued_password(self):
+        self.client.force_login(self.admin)
+        result = self.client.post("/api/auth/members/", {"username": "new-member"}).json()
+        endpoint = f'/api/auth/members/{result["id"]}/issued-password/'
+        response = self.client.get(endpoint)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "private, no-store")
+        self.assertEqual(response.json(), {"initial_password": result["initial_password"]})
+        self.assertEqual(Client().get(endpoint).status_code, 403)
+        ordinary = Client()
+        ordinary.force_login(self.member)
+        self.assertEqual(ordinary.get(endpoint).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/auth/members/{self.admin.pk}/issued-password/").status_code, 404)
+        self.assertTrue(all("initial_password" not in entry for entry in self.client.get("/api/auth/members/").json()))
+
+    def test_reset_and_reissue_make_a_new_password_available(self):
+        self.client.force_login(self.admin)
+        browser = Client()
+        browser.force_login(self.member)
+        endpoint = f"/api/auth/members/{self.member.pk}/"
+        self.assertIsNone(self.client.get(endpoint + "issued-password/").json()["initial_password"])
+        reset = self.client.post(endpoint + "reset-password/", {}).json()
+        self.assertTrue(reset["is_active"])
+        self.assertRegex(reset["initial_password"], r"^[A-Za-z0-9]{8}$")
+        self.assertEqual(self.client.get(endpoint + "issued-password/").json(), {"initial_password": reset["initial_password"]})
+        self.assertIsNone(browser.get("/api/auth/session/").json()["user"])
+        self.assertEqual(self.client.post(endpoint + "reclaim/").status_code, 200)
+        self.assertIsNone(self.client.get(endpoint + "issued-password/").json()["initial_password"])
+        issued = self.client.post(endpoint + "reissue/").json()
+        self.assertEqual(self.client.get(endpoint + "issued-password/").json(), {"initial_password": issued["initial_password"]})
+
+    def test_member_password_change_clears_previous_issued_password(self):
+        self.client.force_login(self.admin)
+        created = self.client.post("/api/auth/members/", {"username": "change-member"}).json()
+        endpoint = f'/api/auth/members/{created["id"]}/issued-password/'
+        user = User.objects.get(pk=created["id"])
+        browser = Client()
+        browser.force_login(user)
+        password = "My-updated-member-password456!"
+        response = browser.post("/api/auth/password/", {
+            "current_password": created["initial_password"],
+            "password": password,
+        })
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password(password))
+        self.assertIsNone(self.client.get(endpoint).json()["initial_password"])

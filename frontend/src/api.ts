@@ -88,6 +88,10 @@ export const readMembers = () => request<MemberAccount[]>('auth/members/')
 export const issueMember = (username: string) => request<IssuedMember>('auth/members/', 'POST', { username })
 export const reclaimMember = (id: number) => request<MemberAccount>(`auth/members/${id}/reclaim/`, 'POST')
 export const reissueMember = (id: number) => request<IssuedMember>(`auth/members/${id}/reissue/`, 'POST')
+export const readIssuedPassword = (id: number) =>
+  request<{ initial_password: string | null }>(`auth/members/${id}/issued-password/`)
+export const resetMemberPassword = (id: number) =>
+  request<IssuedMember>(`auth/members/${id}/reset-password/`, 'POST')
 export const createWork = (details: WorkDetails) => request<Work>('works/', 'POST', details)
 export const updateWork = (id: string, details: WorkDetails) => request<Work>('works/' + id + '/', 'PATCH', details)
 export const startRevision = (id: string) => request<Work>(`works/${id}/revision/`, 'POST')

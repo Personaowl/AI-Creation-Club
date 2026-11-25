@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import { Copy, UserRound } from '@lucide/vue'
-import { issueMember, reclaimMember, reissueMember } from '../api'
+import { issueMember, readIssuedPassword, reclaimMember, reissueMember, resetMemberPassword } from '../api'
 import type { IssuedMember, MemberAccount } from '../api'
 import GlassDialog from './GlassDialog.vue'
 
@@ -11,13 +11,36 @@ const member = ref(props.member)
 const username = ref('')
 const initialPassword = ref('')
 const credentialInput = ref<HTMLInputElement>()
+const issuedNow = ref(false)
+const loadingPassword = ref(false)
+const passwordError = ref('')
+const resetOpen = ref(false)
+const resetButton = ref<HTMLButtonElement>()
+const confirmResetButton = ref<HTMLButtonElement>()
 const busy = ref(false)
 const error = ref('')
 const feedback = ref('')
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Shanghai' })
 
-async function save(request: () => Promise<MemberAccount | IssuedMember>) {
-  if (busy.value) return
+async function loadPassword() {
+  const current = member.value
+  if (!current?.is_active || loadingPassword.value || busy.value) return
+  loadingPassword.value = true
+  passwordError.value = ''
+  try {
+    const result = await readIssuedPassword(current.id)
+    initialPassword.value = result.initial_password ?? ''
+  } catch (reason) {
+    passwordError.value = reason instanceof Error ? reason.message : '无法读取发放密码。'
+  } finally {
+    loadingPassword.value = false
+  }
+}
+
+onMounted(loadPassword)
+
+async function save(request: () => Promise<MemberAccount | IssuedMember>, message: string, freshIssue = false) {
+  if (busy.value || loadingPassword.value) return
   busy.value = true
   error.value = ''
   feedback.value = ''
@@ -26,12 +49,14 @@ async function save(request: () => Promise<MemberAccount | IssuedMember>) {
     const { initial_password, ...updated } = result as IssuedMember
     member.value = updated
     initialPassword.value = initial_password ?? ''
+    issuedNow.value = freshIssue
+    resetOpen.value = false
+    passwordError.value = ''
+    feedback.value = message
     emit('updated', updated)
     if (initial_password) {
       await nextTick()
       credentialInput.value?.focus()
-    } else {
-      feedback.value = '账号已回收。'
     }
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '无法更新成员账号。'
@@ -41,13 +66,29 @@ async function save(request: () => Promise<MemberAccount | IssuedMember>) {
 }
 
 function issue() {
-  if (username.value.trim()) void save(() => issueMember(username.value.trim()))
+  if (username.value.trim()) void save(() => issueMember(username.value.trim()), '', true)
 }
 
 function changeState() {
   const current = member.value
   if (!current) return
-  void save(() => current.is_active ? reclaimMember(current.id) : reissueMember(current.id))
+  if (current.is_active) void save(() => reclaimMember(current.id), '账号已回收。')
+  else void save(() => reissueMember(current.id), '', true)
+}
+
+async function toggleReset(open: boolean) {
+  resetOpen.value = open
+  error.value = ''
+  await nextTick()
+  if (open) confirmResetButton.value?.focus()
+  else resetButton.value?.focus()
+}
+
+function resetPassword() {
+  const current = member.value
+  if (current?.is_active && resetOpen.value) {
+    void save(() => resetMemberPassword(current.id), '已生成新的 8 位密码。')
+  }
 }
 
 async function copyPassword() {
@@ -67,7 +108,7 @@ async function copyPassword() {
 </script>
 
 <template>
-  <GlassDialog :title="initialPassword ? '账号已发放' : member ? '成员账号' : '发放账号'"
+  <GlassDialog :title="issuedNow ? '账号已发放' : member ? '成员账号' : '发放账号'"
     labelledby="manage-member-heading" @close="!busy && emit('close')">
     <form v-if="!member" class="upload-form" @submit.prevent="issue">
       <label class="form-field">
@@ -86,26 +127,44 @@ async function copyPassword() {
         <strong>{{ member.username }}</strong>
         <span class="manage-status" :data-status="member.is_active ? 'approved' : 'draft'">{{ member.is_active ? '可登录' : '已回收' }}</span>
       </div>
-      <template v-if="initialPassword">
-        <label class="form-field" for="manage-initial-password">初始密码</label>
-        <div class="manage-password">
-          <input id="manage-initial-password" ref="credentialInput" :value="initialPassword" readonly autocomplete="off">
-          <button class="glass-button" type="button" @click="copyPassword"><Copy :size="17" aria-hidden="true" /> 复制密码</button>
+      <div v-if="member.is_active" class="manage-member-credential" :aria-busy="loadingPassword">
+        <template v-if="initialPassword">
+          <label class="form-field" for="manage-initial-password">初始密码</label>
+          <div class="manage-password">
+            <input id="manage-initial-password" ref="credentialInput" type="text" :value="initialPassword" readonly autocomplete="off"
+              spellcheck="false" autocapitalize="none">
+            <button class="glass-button" type="button" :disabled="busy" @click="copyPassword"><Copy :size="17" aria-hidden="true" /> 复制密码</button>
+          </div>
+        </template>
+        <p v-else-if="loadingPassword" class="manage-hint" role="status">正在读取发放密码…</p>
+        <div v-else-if="passwordError" class="manage-credential-error">
+          <p class="form-error" role="alert">{{ passwordError }}</p>
+          <button class="glass-button" type="button" :disabled="busy" @click="loadPassword">重试</button>
         </div>
-        <p class="manage-hint">密码仅在此处显示，请复制后交给成员。</p>
-      </template>
-      <template v-else>
-        <dl class="manage-member-times">
-          <div><dt>发放时间</dt><dd>{{ dateFormat.format(new Date(member.date_joined)) }}</dd></div>
-          <div><dt>最近登录</dt><dd>{{ member.last_login ? dateFormat.format(new Date(member.last_login)) : '尚未登录' }}</dd></div>
-        </dl>
-        <p class="manage-hint">{{ member.is_active ? '回收会停用账号和已有会话，成员原有作品会保留。' : '重新发放会启用账号，并生成新的 8 位密码。' }}</p>
-      </template>
+        <p v-else class="manage-hint">暂无可查看的发放密码。可为该成员生成新密码。</p>
+      </div>
+      <dl class="manage-member-times">
+        <div><dt>发放时间</dt><dd>{{ dateFormat.format(new Date(member.date_joined)) }}</dd></div>
+        <div><dt>最近登录</dt><dd>{{ member.last_login ? dateFormat.format(new Date(member.last_login)) : '尚未登录' }}</dd></div>
+      </dl>
+      <p v-if="!member.is_active" class="manage-hint">重新发放会启用账号，并生成新的 8 位密码。</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <p v-if="feedback" class="manage-hint" role="status">{{ feedback }}</p>
-      <div class="dialog-actions">
-        <button v-if="initialPassword" class="primary-button" type="button" @click="emit('close')">完成</button>
-        <button v-else type="button" class="glass-button" :class="{ 'manage-danger': member.is_active }" :disabled="busy" @click="changeState">
+      <div v-if="resetOpen" class="manage-member-credential">
+        <p class="manage-hint">将生成新的 8 位密码，旧密码和成员当前的登录会话会失效。</p>
+        <div class="dialog-actions">
+          <button class="glass-button" type="button" :disabled="busy" @click="toggleReset(false)">取消</button>
+          <button ref="confirmResetButton" class="primary-button" type="button" :disabled="busy" @click="resetPassword">
+            {{ busy ? '正在重置…' : '确认重置' }}
+          </button>
+        </div>
+      </div>
+      <div v-else class="dialog-actions manage-member-actions">
+        <button v-if="issuedNow" class="primary-button" type="button" @click="emit('close')">完成</button>
+        <button v-if="member.is_active && !issuedNow" ref="resetButton" class="glass-button" type="button"
+          :disabled="busy || loadingPassword" @click="toggleReset(true)">重置密码</button>
+        <button v-if="!issuedNow" type="button" class="glass-button" :class="{ 'manage-danger': member.is_active }"
+          :disabled="busy || loadingPassword" @click="changeState">
           {{ busy ? '正在处理…' : member.is_active ? '回收账号' : '重新发放账号' }}
         </button>
       </div>
