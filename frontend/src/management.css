@@ -77,18 +77,7 @@
 .competition-form input { min-height: 44px; }
 .competition-row { padding: 14px 6px; overflow-wrap: anywhere; }
 
-:root[data-management-theme="dark"] {
-  color-scheme: dark;
-  --ink: #f1effb;
-  --muted: #c6c8e2;
-  --accent: #e0dcff;
-  --ring: #c5b7ff;
-  --edge: #dcd8ff32;
-  --glass-fill: #212941bc;
-  --glass-solid: #252b43;
-  --glass-light: linear-gradient(145deg, #d6d5ff13, #d4d9ff05 55%);
-  --glass-depth: inset 0 1px 1px #ece7ff22, 0 5px 17px #12142358;
-  --canvas: #17192b;
+:root[data-theme="dark"] {
   --manage-surface: #282b47d9;
   --manage-inner: #e3deff13;
   --manage-hover: #e3deff20;
@@ -102,20 +91,7 @@
   --manage-rejected-bg: #663d56;
   --manage-rejected-text: #ffd7e1;
 }
-[data-management-theme="dark"] body { background: var(--canvas); }
-[data-management-theme="dark"] body::before { background: linear-gradient(150deg, #17182ac4, #24243ee3 70%, var(--canvas)), url('./assets/entrystage-ribbons.webp') center top / cover no-repeat; }
-[data-management-theme="dark"] :is(.site-header, .glass-button, .account-avatar, .brand-mark, .account-panel, .primary-button, .glass-dialog) { --glass-fill: #32354fe0; }
-[data-management-theme="dark"] :is(.account-avatar, .brand-mark, .primary-button) { color: var(--ink); }
-[data-management-theme="dark"] .account-avatar { background: var(--manage-symbol); border-color: var(--edge); }
-[data-management-theme="dark"] :is(.main-nav, .nav-item.active, .nav-item:hover, .account-action:hover, .account-action:focus-visible) { background: var(--manage-inner); }
-[data-management-theme="dark"] .account-trigger[aria-expanded="true"] { --glass-fill: #46436a; }
-[data-management-theme="dark"] :is(.account-exit .account-action, .account-exit svg, .form-error) { color: var(--manage-danger); }
-[data-management-theme="dark"] .manage-metric[data-metric] { --glass-fill: var(--manage-surface); }
-[data-management-theme="dark"] .glass-dialog { --glass-light: linear-gradient(145deg, #424467, #282943 74%); }
-[data-management-theme="dark"] :is(.form-field input, .form-field textarea, .form-field select, .preview-stage, .preview-work-details > div) { background: var(--manage-inner); border-color: var(--edge); }
-[data-management-theme="dark"] .form-field option { background: var(--glass-solid); color: var(--ink); }
-[data-management-theme="dark"] .review-note { background: var(--manage-rejected-bg); color: var(--manage-rejected-text); }
-[data-management-theme="dark"] .pdf-open-label { background: var(--glass-solid); }
+[data-theme="dark"] .manage-metric[data-metric] { --glass-fill: var(--manage-surface); }
 
 @media (max-width: 560px) {
   .manage-tabs { width: 100%; }

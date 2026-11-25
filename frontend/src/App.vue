@@ -61,15 +61,17 @@ const managementSection = computed(() => {
   if (fragment.value === '#manage/accounts') return 'accounts'
 })
 const inManagement = computed(() => Boolean(account.value?.is_admin && managementSection.value))
-const darkManagement = ref(false)
+const darkTheme = ref(false)
 try {
-  darkManagement.value = (localStorage.getItem('club-management-theme') ?? localStorage.getItem('theme')) === 'dark'
+  darkTheme.value = (localStorage.getItem('club-theme')
+    ?? localStorage.getItem('club-management-theme')
+    ?? localStorage.getItem('theme')) === 'dark'
 } catch {
   // The default theme does not require browser storage.
 }
 watchEffect(() => {
-  if (inManagement.value && darkManagement.value) document.documentElement.dataset.managementTheme = 'dark'
-  else delete document.documentElement.dataset.managementTheme
+  if (account.value && darkTheme.value) document.documentElement.dataset.theme = 'dark'
+  else delete document.documentElement.dataset.theme
 })
 const galleryTitle = computed(() => ({ library: '全部作品', mine: '我的投稿', favorites: '我的收藏' })[view.value])
 const hasFilters = computed(() => Boolean(search.value.trim() || category.value !== 'all' || competitionFilter.value !== 'all'))
@@ -202,10 +204,10 @@ function onHashChange() {
   if (inManagement.value) window.scrollTo({ top: 0, behavior: 'instant' })
 }
 
-function toggleManagementTheme() {
-  darkManagement.value = !darkManagement.value
+function toggleTheme() {
+  darkTheme.value = !darkTheme.value
   try {
-    localStorage.setItem('club-management-theme', darkManagement.value ? 'dark' : 'light')
+    localStorage.setItem('club-theme', darkTheme.value ? 'dark' : 'light')
   } catch {
     // The theme still works for the current visit.
   }
@@ -219,7 +221,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('focus', onFocus)
   window.removeEventListener('hashchange', onHashChange)
-  delete document.documentElement.dataset.managementTheme
+  delete document.documentElement.dataset.theme
 })
 
 function showView(nextView: View) {
@@ -334,15 +336,15 @@ function onWithdrawn(work: Work) {
           </a>
         </nav>
         <div class="header-end">
-          <button v-if="inManagement" class="glass-button icon-button manage-theme-toggle" type="button"
-            :aria-label="darkManagement ? '切换浅色模式' : '切换深色模式'" @click="toggleManagementTheme">
-            <Sun v-if="darkManagement" :size="19" aria-hidden="true" />
-            <Moon v-else :size="19" aria-hidden="true" />
-          </button>
-          <button v-else class="primary-button header-action" type="button" aria-label="上传作品" @click="openUpload()">
+          <button v-if="!inManagement" class="primary-button header-action" type="button" aria-label="上传作品" @click="openUpload()">
             <Plus :size="19" aria-hidden="true" />
             <span class="header-action-label">上传作品</span>
             <span class="header-action-compact">上传</span>
+          </button>
+          <button class="glass-button icon-button theme-toggle" type="button"
+            :aria-label="darkTheme ? '切换浅色模式' : '切换深色模式'" @click="toggleTheme">
+            <Sun v-if="darkTheme" :size="19" aria-hidden="true" />
+            <Moon v-else :size="19" aria-hidden="true" />
           </button>
           <AccountMenu :account="account" @change-password="passwordOpen = true" @logout="logout" />
         </div>
