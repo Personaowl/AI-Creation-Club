@@ -2,6 +2,8 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { X } from '@lucide/vue'
 
+defineOptions({ inheritAttrs: false })
+
 const props = defineProps<{ title: string; labelledby: string; description?: string; wide?: boolean; keepOpenOnBackdrop?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
@@ -25,6 +27,7 @@ function closeOnBackdrop(event: PointerEvent) {
   <Teleport to="body">
     <dialog
       ref="dialog"
+      v-bind="$attrs"
       class="glass-dialog"
       :class="{ 'dialog-wide': wide }"
       :aria-labelledby="labelledby"

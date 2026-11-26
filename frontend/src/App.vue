@@ -71,6 +71,7 @@ const managementSection = computed(() => {
 })
 const inManagement = computed(() => Boolean(account.value?.is_admin && managementSection.value))
 const darkTheme = ref(false)
+let themeTransition: ViewTransition | undefined
 try {
   darkTheme.value = (localStorage.getItem('club-theme')
     ?? localStorage.getItem('club-management-theme')
@@ -210,13 +211,34 @@ async function onHashChange() {
   }
 }
 
-function toggleTheme() {
+function applyThemeToggle() {
   darkTheme.value = !darkTheme.value
   try {
     localStorage.setItem('club-theme', darkTheme.value ? 'dark' : 'light')
   } catch {
     // The theme still works for the current visit.
   }
+}
+
+function toggleTheme() {
+  if (themeTransition) {
+    themeTransition.skipTransition()
+    void themeTransition.updateCallbackDone.then(applyThemeToggle, applyThemeToggle)
+    return
+  }
+  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    applyThemeToggle()
+    return
+  }
+  themeTransition = document.startViewTransition(async () => {
+    applyThemeToggle()
+    await nextTick()
+  })
+  void themeTransition.finished.then(clearThemeTransition, clearThemeTransition)
+}
+
+function clearThemeTransition() {
+  themeTransition = undefined
 }
 
 onMounted(() => {

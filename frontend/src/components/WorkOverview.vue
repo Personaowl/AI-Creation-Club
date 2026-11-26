@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { assetPath } from '../works'
 import type { Work } from '../works'
+import TeamPhotoGallery from './TeamPhotoGallery.vue'
 
 const props = defineProps<{ work: Work }>()
 const photos = computed(() => props.work.assets.filter(item => item.kind === 'photo'))
@@ -20,12 +20,7 @@ const photos = computed(() => props.work.assets.filter(item => item.kind === 'ph
       </section>
       <section v-if="photos.length" class="work-detail-panel">
         <h2>团队风采</h2>
-        <ul class="team-photos">
-          <li v-for="(photo, index) in photos" :key="photo.id">
-            <img :src="assetPath(work, photo, 'photo')" :alt="'比赛照片 ' + (index + 1) + ' · ' + photo.original_name"
-              loading="lazy" decoding="async">
-          </li>
-        </ul>
+        <TeamPhotoGallery :work="work" :photos="photos" />
       </section>
     </div>
     <section v-if="work.award_info || work.ip_details" class="work-detail-panel work-results">
