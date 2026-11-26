@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ImagePlus, Trash2, UploadCloud } from '@lucide/vue'
+import { ChevronDown, ImagePlus, Trash2, UploadCloud } from '@lucide/vue'
 import GlassDialog from './GlassDialog.vue'
 import { createWork, deleteAsset, submitWork, updateWork, uploadAsset } from '../api'
 import { fileExtension, fileExtensions, fileFormatLabels, fileKinds, fileSize, photoExtensions, photoMaxBytes, photoMaxCount, workAttachments } from '../works'
@@ -143,7 +143,7 @@ async function save(sendForReview: boolean) {
   <GlassDialog
     :title="props.work?.revision_of ? '编辑修改稿' : props.work ? '编辑作品' : '上传作品'"
     labelledby="upload-heading"
-    :description="props.work?.revision_of ? '审核通过后，修改会应用到原作品。' : '把同一件作品的文件作为附件添加，再一起提交审核。'"
+    :description="props.work?.revision_of ? '审核通过后更新原作品。' : undefined"
     wide
     keep-open-on-backdrop
     @close="close"
@@ -151,45 +151,47 @@ async function save(sendForReview: boolean) {
     <form class="upload-form" @submit.prevent="save(true)">
       <label class="form-field">
         <span>作品名称 <small>必填</small></span>
-        <input v-model="title" maxlength="120" required :disabled="saving" placeholder="输入竞赛作品名称">
+        <input v-model="title" maxlength="120" required :disabled="saving">
       </label>
       <label class="form-field">
-        <span>作品简介 <small>选填</small></span>
-        <textarea v-model="description" maxlength="3000" rows="3" :disabled="saving" placeholder="简单介绍作品" />
+        <span>作品简介</span>
+        <textarea v-model="description" maxlength="3000" rows="3" :disabled="saving" />
       </label>
       <div class="upload-work-details">
         <label class="form-field">
-          <span>比赛分类 <small>选填</small></span>
-          <select v-model="competition" :disabled="saving">
-            <option :value="null">未分类</option>
-            <option v-for="item in competitions" :key="item.id" :value="item.id">{{ item.name }}</option>
-          </select>
+          <span>比赛分类</span>
+          <span class="attachment-select">
+            <select v-model="competition" :disabled="saving">
+              <option :value="null">未分类</option>
+              <option v-for="item in competitions" :key="item.id" :value="item.id">{{ item.name }}</option>
+            </select>
+            <ChevronDown :size="16" aria-hidden="true" />
+          </span>
         </label>
         <label class="form-field">
-          <span>获奖情况 <small>提交审核必填</small></span>
-          <input ref="awardInput" v-model="awardInfo" maxlength="200" required :disabled="saving" placeholder="例如：一等奖、未获奖、评审中">
+          <span>获奖情况 <small>审核必填</small></span>
+          <input ref="awardInput" v-model="awardInfo" maxlength="200" required :disabled="saving" placeholder="未获奖或评审中也可填写">
         </label>
       </div>
       <label class="form-field">
-        <span>知识产权情况 <small>选填</small></span>
-        <textarea v-model="ipDetails" maxlength="1200" rows="2" :disabled="saving" placeholder="可填写论文、专利、软件著作权的名称、编号或进度" />
+        <span>知识产权情况</span>
+        <textarea v-model="ipDetails" maxlength="1200" rows="2" :disabled="saving" placeholder="论文、专利、软著" />
       </label>
       <fieldset class="upload-team">
-        <legend>团队风采 <small>选填</small></legend>
-        <p class="upload-team-hint">作品上架后，团队简介和照片会出现在作品详情中。</p>
+        <legend>团队风采</legend>
         <div class="upload-work-details">
           <label class="form-field">
-            <span>团队名称 <small>选填</small></span>
+            <span>团队名称</span>
             <input v-model="teamName" maxlength="120" :disabled="saving">
           </label>
           <label class="form-field">
-            <span>团队成员 <small>选填</small></span>
-            <textarea v-model="teamMembers" maxlength="600" rows="1" :disabled="saving" placeholder="多人可用顿号或换行分隔" />
+            <span>团队成员</span>
+            <textarea v-model="teamMembers" maxlength="600" rows="1" :disabled="saving" />
           </label>
         </div>
         <label class="form-field">
-          <span>团队简介 <small>选填</small></span>
-          <textarea v-model="teamIntro" maxlength="1200" rows="2" :disabled="saving" placeholder="介绍团队分工、参赛经历或创作过程" />
+          <span>团队简介</span>
+          <textarea v-model="teamIntro" maxlength="1200" rows="2" :disabled="saving" />
         </label>
         <div class="photo-picker">
           <label class="glass-button photo-pick" :class="{ 'photo-pick-disabled': saving || photoCount >= photoMaxCount }">
@@ -222,7 +224,7 @@ async function save(sendForReview: boolean) {
       >
         <input type="file" :accept="fileExtensions.map(ext => '.' + ext).join(',')" multiple aria-label="选择作品附件" :disabled="saving" @change="onInput">
         <span class="upload-icon"><UploadCloud :size="24" /></span>
-        <strong>拖入文件，或点击选择</strong>
+        <strong>添加作品附件</strong>
         <small>{{ fileFormatLabels }}</small>
       </div>
       <ul v-if="attachments.length || files.length" class="upload-attachments">

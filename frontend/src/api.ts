@@ -77,6 +77,7 @@ export const reviewWork = (id: string, decision: 'approved' | 'rejected', note: 
   request<ManagedWork>(`manage/works/${id}/review/`, 'POST', { decision, note })
 export const changeWorkAccess = (id: string, fields: Partial<Pick<ManagedWork, 'is_visible' | 'allow_download' | 'competition'>>) =>
   request<ManagedWork>(`manage/works/${id}/access/`, 'PATCH', fields)
+export const deleteManagedWork = (id: string) => request<void>(`manage/works/${id}/`, 'DELETE')
 export const readCompetitions = () => request<Competition[]>('competitions/')
 export const createCompetition = (name: string) => request<Competition>('manage/competitions/', 'POST', { name })
 export const renameCompetition = (id: number, name: string) => request<Competition>(`manage/competitions/${id}/`, 'PATCH', { name })

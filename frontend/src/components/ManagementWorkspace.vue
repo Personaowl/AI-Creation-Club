@@ -27,7 +27,7 @@ const reviewFilters = [
   { id: 'rejected', title: '已退回' },
 ] as const
 const displayFilters = [
-  { id: 'unlisted', title: '待上架' },
+  { id: 'unlisted', title: '未上架' },
   { id: 'published', title: '已上架' },
 ] as const
 const works = ref<ManagedWork[]>([])
@@ -126,6 +126,15 @@ function updateWork(work: ManagedWork) {
   emit('workUpdated')
 }
 
+function removeWork(work: ManagedWork) {
+  refreshNumber += 1
+  loading.value = false
+  works.value = works.value.filter(item => item.id !== work.id && item.revision_of !== work.id)
+  selectedWork.value = undefined
+  notice.value = '已删除「' + work.title + '」。'
+  emit('workUpdated')
+}
+
 function updateCompetition(id: number, updated?: Competition) {
   emit('competitionChanged', id, updated)
   void refresh(true)
@@ -219,7 +228,7 @@ onBeforeUnmount(() => {
         <li v-for="work in filteredWorks" :key="work.id">
           <button class="manage-row" type="button" @click="openWork(work.id)">
             <span class="manage-row-title"><strong>{{ work.title }}</strong><small>{{ work.revision_of ? '修改稿 · ' : '' }}{{ work.owner_username }} · {{ workAttachments(work).length }} 个附件</small></span>
-            <span class="manage-status" :data-status="work.status">{{ work.is_visible ? '已上架' : work.status === 'approved' ? '待上架' : statusLabels[work.status] }}</span>
+            <span class="manage-status" :data-status="work.status">{{ work.is_visible ? '已上架' : work.status === 'approved' ? '未上架' : statusLabels[work.status] }}</span>
             <ChevronRight :size="18" aria-hidden="true" />
           </button>
         </li>
@@ -245,7 +254,7 @@ onBeforeUnmount(() => {
     </section>
 
     <WorkModerationDialog v-if="currentWork" :key="`${section}-${currentWork.id}`" :work="currentWork" :competitions="competitions" :mode="displaying ? 'display' : 'review'"
-      @close="selectedWork = undefined" @updated="updateWork" @refresh="refresh()" @open-display="openDisplay" />
+      @close="selectedWork = undefined" @updated="updateWork" @deleted="removeWork" @refresh="refresh()" @open-display="openDisplay" />
     <ManageMemberDialog v-if="memberOpen" :member="selectedMember" @close="memberOpen = false" @updated="updateMember" />
   </section>
 </template>

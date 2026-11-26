@@ -302,6 +302,41 @@ class WorkTests(TestCase):
             [(False, True), (True, True), (True, False)],
         )
 
+    def test_admin_can_delete_an_approved_work_and_clean_up_its_files(self):
+        original = self.draft()
+        other = self.draft("保留的作品")
+        self.attachment(original, pptx())
+        photo_id = self.attachment(original, team_photo())
+        self.publish(original)
+
+        public_url = f"/api/works/{original}/"
+        revision_id = self.author.post(public_url + "revision/").json()["id"]
+        extra_id = self.attachment(revision_id, SimpleUploadedFile("修改稿附件.pdf", sample_pdf()))
+        self.assertEqual(self.viewer.post(public_url + "comments/", {"body": "作品评论"}).status_code, 201)
+        photo = Asset.objects.get(pk=photo_id)
+        shared = Asset.objects.create(
+            work_id=other, file=photo.file.name, original_name=photo.original_name,
+            extension=photo.extension, kind=photo.kind, size=photo.size,
+        )
+        files_to_remove = [asset.file for asset in Asset.objects.filter(work_id=original).exclude(pk=photo_id)]
+        files_to_remove.append(Asset.objects.get(pk=extra_id).file)
+        self.assertTrue(all(file.storage.exists(file.name) for file in files_to_remove))
+
+        path = f"/api/manage/works/{original}/"
+        self.assertEqual(Client().delete(path).status_code, 403)
+        self.assertEqual(self.author.delete(path).status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/manage/works/{other}/").status_code, 400)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.client.delete(path).status_code, 204)
+        self.assertEqual(self.client.delete(path).status_code, 404)
+        self.assertEqual(self.viewer.get(public_url).status_code, 404)
+        self.assertEqual(self.author.get(f"/api/works/{revision_id}/").status_code, 404)
+        self.assertFalse(WorkComment.objects.filter(work_id=original).exists())
+        self.assertFalse(Asset.objects.filter(work_id__in=[original, revision_id]).exists())
+        self.assertFalse(any(file.storage.exists(file.name) for file in files_to_remove))
+        shared.refresh_from_db()
+        self.assertTrue(shared.file.storage.exists(shared.file.name))
+
     def test_rejection_requires_a_reason_and_accepts_resubmission(self):
         work = self.draft()
         address = f"/api/works/{work}/"

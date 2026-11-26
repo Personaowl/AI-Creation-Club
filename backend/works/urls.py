@@ -24,6 +24,7 @@ urlpatterns = [
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/viewer/", views.office_viewer, name="office_viewer"),
     path("works/<uuid:work_id>/submit/", views.submit),
     path("works/<uuid:work_id>/withdraw/", views.withdraw),
+    path("manage/works/<uuid:work_id>/", views.delete_work),
     path("manage/works/<uuid:work_id>/review/", views.review),
     path("manage/works/<uuid:work_id>/access/", views.access),
 ]

@@ -209,6 +209,13 @@ def access(request, work_id):
     return Response(work_data(request, services.change_access(request.user, work_id, **payload.validated_data), managed=True))
 
 
+@api_view(["DELETE"])
+@permission_classes([IsAdministrator])
+def delete_work(request, work_id):
+    services.delete_work(request.user, work_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @api_view(["GET"])
 def download(request, work_id, asset_id):
     asset = visible_asset(request, work_id, asset_id)

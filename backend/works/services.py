@@ -90,10 +90,13 @@ def remove_asset(user, work_id, asset_id):
 def remove_asset_record(asset):
     storage, name = asset.file.storage, asset.file.name
     asset.delete()
+    clean_up_file_after_commit(storage, name)
 
+
+def clean_up_file_after_commit(storage, name):
     def remove_file():
         # A draft and its published work can share the same stored attachment.
-        if not Asset.objects.filter(file=name).exists():
+        if name and not Asset.objects.filter(file=name).exists():
             storage.delete(name)
 
     transaction.on_commit(remove_file, robust=True)
@@ -128,6 +131,9 @@ def withdraw_work(user, work_id):
 @transaction.atomic
 def review_work(user, work_id, decision, note=""):
     require_reviewer(user)
+    parent_id = get_object_or_404(Work.objects.only("revision_of"), pk=work_id).revision_of_id
+    # Lock the published work before its revision, as deletion does.
+    original = lock_work(parent_id) if parent_id else None
     work = lock_work(work_id)
     if work.status != Work.Status.PENDING:
         raise ValidationError({"detail": "只有待审核的作品可以审核。"})
@@ -136,8 +142,8 @@ def review_work(user, work_id, decision, note=""):
     if decision == Work.Status.REJECTED and not note.strip():
         raise ValidationError({"note": "退回时请填写原因。"})
     note = note.strip()
-    if work.revision_of_id and decision == Work.Status.APPROVED:
-        return approve_revision(work, user, note)
+    if original and decision == Work.Status.APPROVED:
+        return approve_revision(work, original, user, note)
 
     work.status = decision
     work.review_note = note
@@ -149,8 +155,7 @@ def review_work(user, work_id, decision, note=""):
     return work
 
 
-def approve_revision(revision, reviewer, note):
-    work = lock_work(revision.revision_of_id)
+def approve_revision(revision, work, reviewer, note):
     for field in CONTENT_FIELDS:
         setattr(work, field, getattr(revision, field))
     work.review_note = note
@@ -188,6 +193,21 @@ def change_access(user, work_id, **fields):
             work=work, actor=user, is_visible=work.is_visible, allow_download=work.allow_download,
         )
     return work
+
+
+@transaction.atomic
+def delete_work(user, work_id):
+    require_reviewer(user)
+    work = lock_work(work_id)
+    if work.status != Work.Status.APPROVED:
+        raise ValidationError({"detail": "只能在展示管理中删除已通过审核的作品。"})
+
+    revision_ids = list(Work.objects.select_for_update().filter(revision_of=work).values_list("pk", flat=True))
+    assets = Asset.objects.filter(work_id__in=[work.pk, *revision_ids]).select_for_update()
+    files = {asset.file.name: asset.file.storage for asset in assets}
+    work.delete()
+    for name, storage in files.items():
+        clean_up_file_after_commit(storage, name)
 
 
 @transaction.atomic
