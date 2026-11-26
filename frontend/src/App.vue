@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import {
-  Aperture, CalendarDays, ChevronDown, Clapperboard, Code2, Compass, FileText, FolderOpen, Heart,
-  LayoutGrid, Moon, Music2, Plus, Presentation, Search, ShieldCheck, Sun, Trophy, X,
+  Aperture, CalendarDays, ChevronDown, ChevronRight, Compass, FolderOpen, Heart,
+  LayoutGrid, Moon, Paperclip, Plus, Search, ShieldCheck, Sun, Trophy, X,
 } from '@lucide/vue'
 import { readCompetitions, readSession, readWorks, signOut } from './api'
 import type { Account } from './api'
@@ -12,11 +12,8 @@ import GlassFilter from './components/GlassFilter.vue'
 import LoginPage from './components/LoginPage.vue'
 import PasswordDialog from './components/PasswordDialog.vue'
 import UploadDialog from './components/UploadDialog.vue'
-import WorkCover from './components/WorkCover.vue'
-import { kindLabels, statusLabels, workAttachments, workDetailPath } from './works'
-import type { Competition, Cover, FilterValue, Work, WorkKind } from './works'
-const icons = { slides: Presentation, pdf: FileText, video: Clapperboard, audio: Music2, source: Code2 }
-const covers: Partial<Record<WorkKind, Cover>> = { slides: 'form', video: 'lake', source: 'code' }
+import { statusLabels, workAttachments, workDetailPath } from './works'
+import type { Competition, FilterValue, Work } from './works'
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' })
 const ManagementWorkspace = defineAsyncComponent(() => import('./components/ManagementWorkspace.vue'))
 const PdfReader = defineAsyncComponent(() => import('./components/PdfReader.vue'))
@@ -123,10 +120,6 @@ const shownWorks = computed(() => {
     return sort.value === 'recent' ? b.updated_at.localeCompare(a.updated_at) : a.updated_at.localeCompare(b.updated_at)
   })
 })
-
-function firstKind(work: Work): WorkKind {
-  return workAttachments(work)[0]?.kind ?? 'slides'
-}
 
 async function refresh() {
   const number = ++refreshNumber
@@ -460,31 +453,33 @@ function onWithdrawn(work: Work) {
           </div>
 
           <div v-if="shownWorks.length" class="work-grid">
-            <article v-for="work in shownWorks" :key="work.id" class="work-card glass-panel">
+            <article v-for="work in shownWorks" :key="work.id" class="work-card glass-panel" :class="{ 'work-card-with-favorite': work.is_visible }">
               <a class="work-open" :href="workDetailPath(work.id)" :aria-label="'查看作品 ' + work.title">
-                <div class="work-cover">
-                  <WorkCover :cover="covers[firstKind(work)]" :kind="firstKind(work)" />
-                  <span class="media-chip">
-                    <component :is="icons[firstKind(work)]" :size="15" /> {{ workAttachments(work).length > 1 ? '多种附件' : workAttachments(work).length ? kindLabels[firstKind(work)] : '待补充附件' }}
-                  </span>
-                </div>
                 <div class="work-copy">
-                  <h3>{{ work.title }}</h3>
-                  <span v-if="work.competition_name" class="work-competition">
-                    <span v-if="work.competition_year" class="work-edition">{{ work.competition_year }}</span>
-                    {{ work.competition_name }}
+                  <div class="work-card-heading">
+                    <h3>{{ work.title }}</h3>
+                    <div v-if="work.competition_name" class="work-competition">
+                      <Trophy :size="15" aria-hidden="true" />
+                      <span>{{ work.competition_name }}</span>
+                      <span v-if="work.competition_year" class="work-edition">{{ work.competition_year }} 年</span>
+                    </div>
+                  </div>
+                  <p v-if="work.description">{{ work.description }}</p>
+                </div>
+                <div class="work-meta">
+                  <span class="work-meta-files">
+                    <Paperclip :size="15" aria-hidden="true" /> {{ workAttachments(work).length }} 个附件
                   </span>
-                  <p>{{ work.description || '暂无简介' }}</p>
-                  <div class="work-meta">
-                    <span>{{ workAttachments(work).length }} 个附件</span>
+                  <span class="work-meta-end">
                     <span v-if="view === 'mine'">{{ work.revision ? '修改稿 · ' + statusLabels[work.revision.status] : work.is_visible ? '已上架' : statusLabels[work.status] }}</span>
                     <time v-else :datetime="work.updated_at">{{ dateFormat.format(new Date(work.updated_at)) }}</time>
-                  </div>
+                    <ChevronRight :size="17" aria-hidden="true" />
+                  </span>
                 </div>
               </a>
               <button v-if="work.is_visible" class="card-favorite" type="button" :aria-label="(favorites.includes(work.id) ? '取消收藏' : '收藏') + work.title"
                 :aria-pressed="favorites.includes(work.id)" @click="toggleFavorite(work.id)">
-                <Heart :size="19" :class="{ 'heart-filled': favorites.includes(work.id) }" />
+                <Heart :size="19" :class="{ 'heart-filled': favorites.includes(work.id) }" aria-hidden="true" />
               </button>
             </article>
           </div>

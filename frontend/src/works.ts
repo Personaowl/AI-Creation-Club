@@ -1,5 +1,4 @@
 export type WorkKind = 'slides' | 'pdf' | 'video' | 'audio' | 'source'
-export type Cover = 'form' | 'lake' | 'code' | 'architecture'
 export type WorkStatus = 'draft' | 'pending' | 'approved' | 'rejected'
 
 export interface Asset {
