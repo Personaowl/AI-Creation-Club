@@ -58,7 +58,7 @@ function saveAccess() {
 </script>
 
 <template>
-  <PreviewDialog :work="work" moderating :busy="saving" @close="emit('close')">
+  <PreviewDialog :work="work" :busy="saving" @close="emit('close')">
     <template #context>
       <div class="manage-work-context">
         <span>投稿人 {{ work.owner_username }}</span>

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import { ArrowLeft, Download } from '@lucide/vue'
 import { readWork, RequestError } from '../api'
 import { brandName } from '../branding'
-import { assetPath, pdfReaderPath } from '../works'
+import { assetPath, pdfReaderPath, workDetailPath } from '../works'
 import type { Work } from '../works'
 import PdfPreview from './PdfPreview.vue'
 
@@ -37,7 +37,7 @@ function rememberPage(page: number) {
 <template>
   <main class="pdf-reader" aria-labelledby="pdf-reader-heading">
     <header class="pdf-reader-header glass-panel">
-      <a class="glass-button" href="./"><ArrowLeft :size="17" aria-hidden="true" /> 返回作品库</a>
+      <a class="glass-button" :href="workDetailPath(workId)"><ArrowLeft :size="17" aria-hidden="true" /> 返回作品详情</a>
       <h1 id="pdf-reader-heading">{{ asset?.original_name || 'PDF 阅读' }}</h1>
       <a v-if="work?.can_download && asset" class="glass-button" :href="assetPath(work, asset, 'download')" download>
         <Download :size="17" aria-hidden="true" /> 下载原件

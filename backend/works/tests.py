@@ -404,8 +404,14 @@ class WorkTests(TestCase):
         pdf_url = f"/api/works/{work}/assets/{pdf}/"
         audio_url = f"/api/works/{work}/assets/{audio}/"
         self.assertEqual(self.viewer.get(pdf_url + "pdf/1/").status_code, 404)
+        self.assertEqual(self.viewer.get(pdf_url + "pdf/layout/").status_code, 404)
         self.assertEqual(self.viewer.get(audio_url + "audio/").status_code, 404)
         self.publish(work)
+        layout = self.viewer.get(pdf_url + "pdf/layout/")
+        self.assertEqual(layout.status_code, 200)
+        self.assertEqual(layout["Cache-Control"], "private, no-store")
+        self.assertEqual(layout.json(), {"pages": [[600, 400], [400, 600]]})
+        self.assertEqual(self.viewer.get(audio_url + "pdf/layout/").status_code, 404)
         page = self.viewer.get(pdf_url + "pdf/2/")
         self.assertEqual(page.status_code, 200)
         self.assertEqual(page["Content-Type"], "image/png")
@@ -430,6 +436,7 @@ class WorkTests(TestCase):
             self.assertEqual(b"".join(response.streaming_content), original)
         self.client.patch(access, {"is_visible": False}, content_type="application/json")
         self.assertEqual(self.viewer.get(pdf_url + "pdf/1/").status_code, 404)
+        self.assertEqual(self.viewer.get(pdf_url + "pdf/layout/").status_code, 404)
         self.assertEqual(self.viewer.get(audio_url + "audio/").status_code, 404)
 
     def test_malformed_pdf_and_mp3_are_rejected(self):

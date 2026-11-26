@@ -18,6 +18,7 @@ urlpatterns = [
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/photo/", views.photo),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/video/", views.media, {"kind": Asset.Kind.VIDEO}),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/audio/", views.media, {"kind": Asset.Kind.AUDIO}, name="asset_audio"),
+    path("works/<uuid:work_id>/assets/<uuid:asset_id>/pdf/layout/", views.pdf_layout),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/pdf/<int:page>/", views.pdf_page, name="asset_pdf_page"),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/presentation/", views.presentation),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/viewer/", views.office_viewer, name="office_viewer"),

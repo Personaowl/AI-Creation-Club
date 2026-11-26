@@ -1,19 +1,18 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import {
   Aperture, ChevronDown, Clapperboard, Code2, Compass, FileText, FolderOpen, Heart,
   LayoutGrid, Moon, Music2, Plus, Presentation, Search, ShieldCheck, Sun, X,
 } from '@lucide/vue'
-import { readCompetitions, readSession, readWork, readWorks, RequestError, signOut } from './api'
+import { readCompetitions, readSession, readWorks, signOut } from './api'
 import type { Account } from './api'
 import { brandName, platformName } from './branding'
 import AccountMenu from './components/AccountMenu.vue'
 import LoginPage from './components/LoginPage.vue'
 import PasswordDialog from './components/PasswordDialog.vue'
-import PreviewDialog from './components/PreviewDialog.vue'
 import UploadDialog from './components/UploadDialog.vue'
 import WorkCover from './components/WorkCover.vue'
-import { kindLabels, statusLabels, workAttachments } from './works'
+import { kindLabels, statusLabels, workAttachments, workDetailPath } from './works'
 import type { Competition, Cover, Work, WorkKind } from './works'
 
 const categories = [
@@ -29,6 +28,7 @@ const covers: Partial<Record<WorkKind, Cover>> = { slides: 'form', video: 'lake'
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' })
 const ManagementWorkspace = defineAsyncComponent(() => import('./components/ManagementWorkspace.vue'))
 const PdfReader = defineAsyncComponent(() => import('./components/PdfReader.vue'))
+const WorkDetailPage = defineAsyncComponent(() => import('./components/WorkDetailPage.vue'))
 
 type View = 'library' | 'mine' | 'favorites'
 type Category = 'all' | WorkKind
@@ -47,13 +47,15 @@ const category = ref<Category>('all')
 const competitionFilter = ref<'all' | 'unclassified' | number>('all')
 const search = ref('')
 const sort = ref<'recent' | 'oldest' | 'title'>('recent')
-const preview = ref<Work>()
 const draft = ref<Work>()
 const uploadOpen = ref(false)
 const passwordOpen = ref(false)
 const searchInput = ref<HTMLInputElement>()
 const managementMain = ref<HTMLElement>()
 const fragment = ref(window.location.hash)
+const detailWorkId = computed(() => fragment.value.match(/^#work\/([0-9a-f-]{36})$/i)?.[1])
+const detailRefresh = ref(0)
+const detailBackLabel = computed(() => ({ library: '返回作品库', mine: '返回我的投稿', favorites: '返回我的收藏' })[view.value])
 const pdfLocation = computed(() => {
   const match = fragment.value.match(/^#pdf\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\/(\d+))?$/i)
   if (!match) return
@@ -128,24 +130,6 @@ async function refresh() {
     if (typeof competitionFilter.value === 'number' && !groups.some(group => group.id === competitionFilter.value)) {
       competitionFilter.value = 'all'
     }
-    const current = preview.value
-    if (current?.revision_of) {
-      const parent = submissions.find(work => work.id === current.revision_of)
-      if (parent?.revision?.id !== current.id) {
-        preview.value = parent
-      } else {
-        let updated
-        try {
-          updated = await readWork(current.id)
-        } catch (error) {
-          if (!(error instanceof RequestError) || error.status !== 404) throw error
-          updated = await readWork(parent.id)
-        }
-        if (number === refreshNumber && preview.value?.id === current.id) preview.value = updated
-      }
-    } else if (current) {
-      preview.value = [...gallery, ...submissions].find(work => work.id === current.id)
-    }
   } catch (error) {
     if (number === refreshNumber) feedback.value = error instanceof Error ? error.message : '无法加载作品。'
   } finally {
@@ -159,7 +143,8 @@ function acceptAccount(user: Account) {
     mine.value = []
     competitions.value = []
     favorites.value = loadFavorites(user.id)
-    showView('library')
+    view.value = 'library'
+    clearFilters()
   }
   account.value = user
   if (!pdfLocation.value) void refresh()
@@ -172,7 +157,6 @@ function clearAccount() {
   mine.value = []
   competitions.value = []
   favorites.value = []
-  preview.value = undefined
   draft.value = undefined
   uploadOpen.value = false
   passwordOpen.value = false
@@ -202,18 +186,28 @@ async function onFocus() {
     else if (user.id !== account.value?.id) acceptAccount(user)
     else {
       account.value = user
-      if (!pdfLocation.value) void refresh()
+      if (!pdfLocation.value) {
+        detailRefresh.value += 1
+        void refresh()
+      }
     }
   } catch {
     // Keep the current view during a temporary network interruption.
   }
 }
 
-function onHashChange() {
+async function onHashChange() {
   const wasReading = Boolean(pdfLocation.value)
+  const wasInDetail = Boolean(detailWorkId.value)
   fragment.value = window.location.hash
   if (wasReading && !pdfLocation.value && account.value) void refresh()
-  if (inManagement.value) window.scrollTo({ top: 0, behavior: 'instant' })
+  await nextTick()
+  if (inManagement.value || detailWorkId.value || pdfLocation.value) window.scrollTo({ top: 0, behavior: 'instant' })
+  if (wasInDetail && fragment.value === '#gallery') {
+    const list = document.getElementById('gallery')
+    list?.scrollIntoView({ behavior: 'instant' })
+    list?.focus({ preventScroll: true })
+  }
 }
 
 function toggleTheme() {
@@ -237,13 +231,21 @@ onBeforeUnmount(() => {
 })
 
 function showView(nextView: View) {
-  if (inManagement.value) {
+  if (inManagement.value || detailWorkId.value) {
     window.history.pushState(null, '', window.location.pathname + window.location.search)
     fragment.value = ''
   }
   view.value = nextView
   clearFilters()
   window.scrollTo({ top: 0, behavior: 'instant' })
+}
+
+function returnToGallery() {
+  window.location.hash = 'gallery'
+}
+
+function focusWorkDetails() {
+  document.getElementById('work-detail')?.focus()
 }
 
 function clearFilters() {
@@ -280,7 +282,6 @@ function toggleFavorite(id: string) {
 }
 
 function openUpload(work?: Work) {
-  preview.value = undefined
   draft.value = work
   uploadOpen.value = true
 }
@@ -288,6 +289,7 @@ function openUpload(work?: Work) {
 function closeUpload() {
   uploadOpen.value = false
   draft.value = undefined
+  detailRefresh.value += 1
   void refresh()
 }
 
@@ -314,8 +316,6 @@ function onSaved(work: Work) {
 
 function onWithdrawn(work: Work) {
   updateMyWork(work)
-  if (preview.value?.id === work.id) preview.value = work
-  feedback.value = work.revision_of ? '修改稿已撤回。' : '投稿已撤回，作品已回到草稿。'
   void refresh()
 }
 </script>
@@ -325,10 +325,11 @@ function onWithdrawn(work: Work) {
     <p class="glass-button" role="status">正在连接 {{ brandName }}…</p>
   </main>
   <LoginPage v-else-if="!account" :connection-error="connectionError" @signed-in="acceptAccount" @retry="initialize" />
-  <PdfReader v-else-if="pdfLocation" :key="fragment" v-bind="pdfLocation" />
+  <PdfReader v-else-if="pdfLocation" :key="account.id + ':' + fragment" v-bind="pdfLocation" />
 
   <template v-else>
     <a v-if="inManagement" href="#manage-area" class="skip-link" @click.prevent="managementMain?.focus()">跳到管理内容</a>
+    <a v-else-if="detailWorkId" href="#work-detail" class="skip-link" @click.prevent="focusWorkDetails">跳到作品详情</a>
     <a v-else href="#gallery" class="skip-link">跳到作品列表</a>
     <div class="site-shell">
       <header class="site-header glass-panel glass-refractive" :class="{ 'site-header-admin': account.is_admin }">
@@ -370,6 +371,9 @@ function onWithdrawn(work: Work) {
         <ManagementWorkspace :section="managementSection" :competitions="competitions"
           @work-updated="refresh" @competition-changed="onCompetitionChanged" />
       </main>
+      <WorkDetailPage v-else-if="detailWorkId" :key="account.id + ':' + detailWorkId" :work-id="detailWorkId"
+        :favorite="favorites.includes(detailWorkId)" :back-label="detailBackLabel" :refresh-key="detailRefresh"
+        @back="returnToGallery" @favorite="toggleFavorite(detailWorkId)" @edit="openUpload" @withdrawn="onWithdrawn" />
       <main v-else>
         <p v-if="feedback" class="site-feedback glass-panel" role="status">{{ feedback }}</p>
         <section v-if="view === 'library'" class="hero" aria-labelledby="hero-title">
@@ -433,7 +437,7 @@ function onWithdrawn(work: Work) {
 
           <div v-if="shownWorks.length" class="work-grid">
             <article v-for="work in shownWorks" :key="work.id" class="work-card glass-panel">
-              <button class="work-open" type="button" :aria-label="'预览 ' + work.title" @click="preview = work">
+              <a class="work-open" :href="workDetailPath(work.id)" :aria-label="'查看作品 ' + work.title">
                 <div class="work-cover">
                   <WorkCover :cover="covers[firstKind(work)]" :kind="firstKind(work)" />
                   <span class="media-chip">
@@ -450,7 +454,7 @@ function onWithdrawn(work: Work) {
                     <time v-else :datetime="work.updated_at">{{ dateFormat.format(new Date(work.updated_at)) }}</time>
                   </div>
                 </div>
-              </button>
+              </a>
               <button v-if="work.is_visible" class="card-favorite" type="button" :aria-label="(favorites.includes(work.id) ? '取消收藏' : '收藏') + work.title"
                 :aria-pressed="favorites.includes(work.id)" @click="toggleFavorite(work.id)">
                 <Heart :size="19" :class="{ 'heart-filled': favorites.includes(work.id) }" />
@@ -468,10 +472,5 @@ function onWithdrawn(work: Work) {
 
     <UploadDialog v-if="uploadOpen" :work="draft" :competitions="competitions" @close="closeUpload" @saved="onSaved" />
     <PasswordDialog v-if="passwordOpen" @close="passwordOpen = false" @saved="passwordOpen = false; feedback = '密码已更新。'" />
-    <PreviewDialog
-      v-if="preview" :key="preview.id" :work="preview" :favorite="favorites.includes(preview.id)"
-      @close="preview = undefined" @toggle-favorite="toggleFavorite(preview.id)" @edit="openUpload"
-      @view-revision="preview = $event" @withdrawn="onWithdrawn" @refresh="refresh"
-    />
   </template>
 </template>

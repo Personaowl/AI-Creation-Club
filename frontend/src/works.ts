@@ -84,6 +84,10 @@ export function pdfReaderPath(workId: string, assetId: string): string {
   return '#pdf/' + workId + '/' + assetId
 }
 
+export function workDetailPath(workId: string): string {
+  return '#work/' + workId
+}
+
 export function fileExtension(name: string): string {
   const dot = name.lastIndexOf('.')
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''

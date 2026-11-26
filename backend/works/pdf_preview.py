@@ -17,6 +17,23 @@ def is_readable_pdf(source):
         return False
 
 
+def pdf_page_sizes(source):
+    try:
+        with pdf_lock, pdfium.PdfDocument(source) as document:
+            sizes = []
+            for index in range(len(document)):
+                try:
+                    width, height = document.get_page_size(index)
+                except pdfium.PdfiumError:
+                    width, height = 0, 0
+                if not (isfinite(width) and isfinite(height) and min(width, height) > 0):
+                    width, height = 595, 842
+                sizes.append((width, height))
+            return sizes
+    except pdfium.PdfiumError:
+        return []
+
+
 def render_pdf_page(source, number):
     try:
         with pdf_lock, pdfium.PdfDocument(source) as document:

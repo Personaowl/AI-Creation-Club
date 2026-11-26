@@ -16,7 +16,7 @@ from . import services
 from .files import file_response, media_response, open_asset, private_response
 from .models import Asset, Competition, Work
 from .office import OfficeUnavailable, preview_config
-from .pdf_preview import render_pdf_page
+from .pdf_preview import pdf_page_sizes, render_pdf_page
 from .policies import can_download_work, can_view_work
 from .serializers import (
     AccessSerializer, AssetSerializer, CommentSerializer, CompetitionSerializer, ManagedWorkSerializer,
@@ -233,6 +233,18 @@ def media(request, work_id, asset_id, kind):
     if asset.kind != kind:
         raise NotFound()
     return media_response(asset, request.headers.get("Range"))
+
+
+@api_view(["GET"])
+def pdf_layout(request, work_id, asset_id):
+    asset = visible_asset(request, work_id, asset_id)
+    if asset.kind != Asset.Kind.PDF:
+        raise NotFound()
+    with open_asset(asset) as source:
+        sizes = pdf_page_sizes(source)
+    if not sizes:
+        raise NotFound("PDF 无法读取。")
+    return private_response(Response({"pages": sizes}))
 
 
 @api_view(["GET"])
