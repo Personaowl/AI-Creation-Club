@@ -2,12 +2,15 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from .files import validate_upload
+from .files import PHOTO_MAX_COUNT, prepare_upload
 from .models import AccessChange, Asset, Review, Work
 from .policies import active, can_edit_work, can_revise_work
 
 
-CONTENT_FIELDS = ("title", "description", "competition_id", "competition_name", "team_name", "team_members")
+CONTENT_FIELDS = (
+    "title", "description", "competition_id", "competition_name", "team_name", "team_members",
+    "team_intro", "award_info", "ip_details",
+)
 
 
 def lock_work(work_id):
@@ -55,7 +58,7 @@ def add_asset(user, work_id, upload):
     # Validate without taking a database lock, then check the current state before saving.
     work = get_object_or_404(Work, pk=work_id)
     require_editable(user, work)
-    extension, kind = validate_upload(upload)
+    upload, extension, kind = prepare_upload(upload)
     asset = Asset(
         work_id=work_id, original_name=upload.name, extension=extension, kind=kind, size=upload.size,
     )
@@ -63,6 +66,8 @@ def add_asset(user, work_id, upload):
         with transaction.atomic():
             work = lock_work(work_id)
             require_editable(user, work)
+            if kind == Asset.Kind.PHOTO and work.assets.filter(kind=kind).count() >= PHOTO_MAX_COUNT:
+                raise ValidationError({"file": f"每件作品最多添加 {PHOTO_MAX_COUNT} 张团队照片。"})
             asset.file.save(upload.name, upload, save=False)
             asset.save()
             work.save(update_fields=["updated_at"])
@@ -98,8 +103,10 @@ def remove_asset_record(asset):
 def submit_work(user, work_id):
     work = lock_work(work_id)
     require_editable(user, work)
-    if not work.assets.exists():
-        raise ValidationError({"detail": "请先给作品添加至少一个文件。"})
+    if not work.award_info.strip():
+        raise ValidationError({"detail": "请填写获奖情况，未获奖或评审中也可以填写。"})
+    if not work.assets.exclude(kind=Asset.Kind.PHOTO).exists():
+        raise ValidationError({"detail": "请先给作品添加至少一个作品附件。"})
     work.status = Work.Status.PENDING
     work.review_note = ""
     work.save(update_fields=["status", "review_note", "updated_at"])

@@ -4,35 +4,34 @@ import { ChevronDown, Download, FileArchive, Heart, Music2, Undo2 } from '@lucid
 import { readWork, RequestError, startRevision, withdrawWork } from '../api'
 import GlassDialog from './GlassDialog.vue'
 import PdfPreview from './PdfPreview.vue'
-import { assetPath, fileSize, kindLabels, statusLabels } from '../works'
+import { assetPath, fileSize, kindLabels, pdfReaderPath, statusLabels, workAttachments } from '../works'
 import type { Work } from '../works'
 
 const WorkComments = defineAsyncComponent(() => import('./WorkComments.vue'))
 const props = defineProps<{ work: Work; favorite?: boolean; moderating?: boolean; busy?: boolean }>()
 const emit = defineEmits<{ close: []; toggleFavorite: []; edit: [work: Work]; viewRevision: [work: Work]; withdrawn: [work: Work]; refresh: [] }>()
-const selected = ref(props.work.assets[0]?.id)
+const attachments = computed(() => workAttachments(props.work))
+const photos = computed(() => props.work.assets.filter(item => item.kind === 'photo'))
+const selected = ref(attachments.value[0]?.id)
 const mediaError = ref(false)
-const pdfExpanded = ref(false)
 const withdrawing = ref(false)
 const withdrawError = ref('')
 const withdrawn = ref(false)
 const openingRevision = ref(false)
 const revisionError = ref('')
 const editButton = ref<HTMLButtonElement>()
-const asset = computed(() => props.work.assets.find(item => item.id === selected.value))
+const asset = computed(() => attachments.value.find(item => item.id === selected.value))
 const canWithdraw = computed(() => !props.moderating && props.work.is_mine && props.work.status === 'pending')
 
 watch(selected, () => {
   mediaError.value = false
-  pdfExpanded.value = false
 })
-watch(() => props.work.assets, assets => {
+watch(attachments, assets => {
   if (!assets.some(item => item.id === selected.value)) selected.value = assets[0]?.id
 })
 
 function close() {
-  if (pdfExpanded.value) pdfExpanded.value = false
-  else if (!withdrawing.value && !openingRevision.value && !props.busy) emit('close')
+  if (!withdrawing.value && !openingRevision.value && !props.busy) emit('close')
 }
 
 async function edit() {
@@ -76,32 +75,31 @@ async function withdraw() {
 </script>
 
 <template>
-  <GlassDialog :title="pdfExpanded && asset ? asset.original_name : work.title" labelledby="preview-heading"
-    :description="pdfExpanded ? undefined : work.description" :close-label="pdfExpanded ? '返回作品详情' : undefined"
-    :expanded="pdfExpanded" wide @close="close">
-    <template v-if="!pdfExpanded">
-      <slot name="context" />
-      <p v-if="work.revision_of && !moderating" class="preview-feedback">这是作品修改稿。审核通过后，已展示的作品会更新。</p>
-      <p v-if="work.review_note && (work.is_mine || moderating)" class="review-note">{{ work.review_note }}</p>
-      <dl v-if="work.competition_name || work.team_name || work.team_members" class="preview-work-details">
-        <div v-if="work.competition_name"><dt>比赛名称</dt><dd>{{ work.competition_name }}</dd></div>
-        <div v-if="work.team_name"><dt>团队名称</dt><dd>{{ work.team_name }}</dd></div>
-        <div v-if="work.team_members"><dt>团队成员</dt><dd>{{ work.team_members }}</dd></div>
-      </dl>
-      <label v-if="work.assets.length > 1" class="form-field attachment-choice">
-        <span>作品附件</span>
-        <span class="attachment-select">
-          <select v-model="selected">
-            <option v-for="item in work.assets" :key="item.id" :value="item.id">{{ item.original_name }}</option>
-          </select>
-          <ChevronDown :size="16" aria-hidden="true" />
-        </span>
-      </label>
-    </template>
+  <GlassDialog :title="work.title" labelledby="preview-heading" :description="work.description" wide @close="close">
+    <slot name="context" />
+    <p v-if="work.revision_of && !moderating" class="preview-feedback">这是作品修改稿。审核通过后，已展示的作品会更新。</p>
+    <p v-if="work.review_note && (work.is_mine || moderating)" class="review-note">{{ work.review_note }}</p>
+    <dl v-if="work.competition_name || work.team_name || work.team_members || work.award_info || work.ip_details" class="preview-work-details">
+      <div v-if="work.competition_name"><dt>比赛名称</dt><dd>{{ work.competition_name }}</dd></div>
+      <div v-if="work.team_name"><dt>团队名称</dt><dd>{{ work.team_name }}</dd></div>
+      <div v-if="work.team_members"><dt>团队成员</dt><dd>{{ work.team_members }}</dd></div>
+      <div v-if="work.award_info"><dt>获奖情况</dt><dd>{{ work.award_info }}</dd></div>
+      <div v-if="work.ip_details" class="preview-ip-details"><dt>知识产权情况</dt><dd>{{ work.ip_details }}</dd></div>
+    </dl>
+    <label v-if="attachments.length > 1" class="form-field attachment-choice">
+      <span>作品附件</span>
+      <span class="attachment-select">
+        <select v-model="selected">
+          <option v-for="item in attachments" :key="item.id" :value="item.id">{{ item.original_name }}</option>
+        </select>
+        <ChevronDown :size="16" aria-hidden="true" />
+      </span>
+    </label>
     <div class="preview-stage">
       <template v-if="asset">
         <iframe v-if="asset.kind === 'slides'" :key="asset.id" :src="assetPath(work, asset, 'viewer')" title="PPT 在线预览" allowfullscreen />
-        <PdfPreview v-else-if="asset.kind === 'pdf'" :key="asset.id" v-model:expanded="pdfExpanded" :source="assetPath(work, asset, 'pdf')" />
+        <PdfPreview v-else-if="asset.kind === 'pdf'" :key="asset.id" :source="assetPath(work, asset, 'pdf')"
+          :reader-url="pdfReaderPath(work.id, asset.id)" />
         <video v-else-if="asset.kind === 'video' && !mediaError" :key="asset.id" :src="assetPath(work, asset, 'video')" controls playsinline preload="metadata" @error="mediaError = true" />
         <div v-else-if="asset.kind === 'audio' && !mediaError" :key="asset.id" class="audio-preview">
           <Music2 :size="34" :stroke-width="1.5" aria-hidden="true" />
@@ -118,10 +116,10 @@ async function withdraw() {
       </template>
       <div v-else class="file-preview">还没有上传附件。</div>
     </div>
-    <p v-if="!pdfExpanded && withdrawError" class="form-error preview-feedback" role="alert">{{ withdrawError }}</p>
-    <p v-if="!pdfExpanded && revisionError" class="form-error preview-feedback" role="alert">{{ revisionError }}</p>
-    <p v-if="!pdfExpanded && withdrawn" class="preview-feedback" role="status">{{ work.revision_of ? '修改稿已撤回，可以继续编辑。' : '投稿已撤回，可以继续编辑或重新提交。' }}</p>
-    <footer v-if="!pdfExpanded" class="preview-footer">
+    <p v-if="withdrawError" class="form-error preview-feedback" role="alert">{{ withdrawError }}</p>
+    <p v-if="revisionError" class="form-error preview-feedback" role="alert">{{ revisionError }}</p>
+    <p v-if="withdrawn" class="preview-feedback" role="status">{{ work.revision_of ? '修改稿已撤回，可以继续编辑。' : '投稿已撤回，可以继续编辑或重新提交。' }}</p>
+    <footer class="preview-footer">
       <div class="preview-meta">
         <span v-if="work.is_mine && !moderating">{{ statusLabels[work.status] }}</span>
         <span v-if="work.revision && !moderating">修改稿 · {{ statusLabels[work.revision.status] }}</span>
@@ -143,7 +141,17 @@ async function withdraw() {
         </a>
       </div>
     </footer>
-    <WorkComments v-if="work.is_visible && !moderating" v-show="!pdfExpanded" :work-id="work.id" />
-    <slot v-if="!pdfExpanded" name="management" />
+    <section v-if="work.team_intro || photos.length" class="team-showcase" aria-labelledby="team-showcase-title">
+      <h3 id="team-showcase-title">团队风采</h3>
+      <p v-if="work.team_intro">{{ work.team_intro }}</p>
+      <ul v-if="photos.length" class="team-photos">
+        <li v-for="(photo, index) in photos" :key="photo.id">
+          <img :src="assetPath(work, photo, 'photo')" :alt="'比赛照片 ' + (index + 1) + ' · ' + photo.original_name"
+            loading="lazy" decoding="async">
+        </li>
+      </ul>
+    </section>
+    <WorkComments v-if="work.is_visible && !moderating" :work-id="work.id" />
+    <slot name="management" />
   </GlassDialog>
 </template>

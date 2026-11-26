@@ -6,7 +6,7 @@ export interface Asset {
   id: string
   original_name: string
   extension: string
-  kind: WorkKind
+  kind: WorkKind | 'photo'
   size: number
 }
 
@@ -16,6 +16,9 @@ export interface WorkDetails {
   competition: number | null
   team_name: string
   team_members: string
+  team_intro: string
+  award_info: string
+  ip_details: string
 }
 
 export interface Work extends WorkDetails {
@@ -58,16 +61,27 @@ export interface CommentPage {
   next_before: number | null
 }
 
-export const kindLabels: Record<WorkKind, string> = { slides: '演示文稿', pdf: 'PDF', video: '视频', audio: '音频', source: '源码' }
+export const kindLabels: Record<Asset['kind'], string> = { slides: '演示文稿', pdf: 'PDF', video: '视频', audio: '音频', source: '源码', photo: '团队照片' }
 export const statusLabels: Record<WorkStatus, string> = { draft: '草稿', pending: '待审核', approved: '已通过', rejected: '已退回' }
 export const fileKinds: Record<string, WorkKind> = {
   ppt: 'slides', pptx: 'slides', pdf: 'pdf', mp4: 'video', webm: 'video', mp3: 'audio', zip: 'source',
 }
 export const fileExtensions = Object.keys(fileKinds)
 export const fileFormatLabels = fileExtensions.map(ext => ext === 'webm' ? 'WebM' : ext.toUpperCase()).join('、')
+export const photoExtensions = ['jpg', 'jpeg', 'png', 'webp']
+export const photoMaxCount = 8
+export const photoMaxBytes = 10 * 1024 * 1024
 
-export function assetPath(work: Work, asset: Asset, action: 'video' | 'audio' | 'pdf' | 'viewer' | 'download'): string {
+export function workAttachments(work?: Work) {
+  return work?.assets.filter((asset): asset is Asset & { kind: WorkKind } => asset.kind !== 'photo') ?? []
+}
+
+export function assetPath(work: Work, asset: Asset, action: 'video' | 'audio' | 'pdf' | 'viewer' | 'download' | 'photo'): string {
   return '/api/works/' + work.id + '/assets/' + asset.id + '/' + action + '/'
+}
+
+export function pdfReaderPath(workId: string, assetId: string): string {
+  return '#pdf/' + workId + '/' + assetId
 }
 
 export function fileExtension(name: string): string {

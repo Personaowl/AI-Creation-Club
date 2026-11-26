@@ -1,9 +1,12 @@
 import re
 import zipfile
+from io import BytesIO
 from pathlib import PurePath
 
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
+from PIL import Image, ImageOps
 from rest_framework import serializers
 
 from .models import Asset
@@ -18,6 +21,10 @@ FORMATS = {
     "mp3": (Asset.Kind.AUDIO, "audio/mpeg"),
     "zip": (Asset.Kind.SOURCE, "application/zip"),
 }
+PHOTO_FORMATS = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "webp": "WEBP"}
+PHOTO_MAX_BYTES = 10 * 1024 * 1024
+PHOTO_MAX_PIXELS = 25_000_000
+PHOTO_MAX_COUNT = 8
 BYTE_RANGE = re.compile(r"bytes=(\d{0,18})-(\d{0,18})")
 CHUNK_SIZE = 128 * 1024
 
@@ -39,10 +46,14 @@ def has_mp3_frame(upload, head):
     )
 
 
-def validate_upload(upload):
-    extension = PurePath(upload.name).suffix.lower().lstrip(".")
+def prepare_upload(upload):
+    path = PurePath(upload.name)
+    extension = path.suffix.lower().lstrip(".")
+    if extension in PHOTO_FORMATS:
+        photo = prepare_team_photo(upload, PHOTO_FORMATS[extension], f"{path.stem[:250]}.webp")
+        return photo, "webp", Asset.Kind.PHOTO
     if extension not in FORMATS:
-        raise serializers.ValidationError({"file": "支持 PPT、PPTX、PDF、MP4、WebM、MP3 或 ZIP。"})
+        raise serializers.ValidationError({"file": "作品附件支持 PPT、PPTX、PDF、MP4、WebM、MP3 或 ZIP。团队照片支持 JPG、PNG 或 WebP。"})
     if not 0 < upload.size <= settings.UPLOAD_MAX_BYTES:
         raise serializers.ValidationError({"file": "文件为空或超过上传大小限制。"})
 
@@ -73,7 +84,28 @@ def validate_upload(upload):
         upload.seek(0)
     if not valid:
         raise serializers.ValidationError({"file": "文件内容与所选格式不符。"})
-    return extension, FORMATS[extension][0]
+    return upload, extension, FORMATS[extension][0]
+
+
+def prepare_team_photo(upload, photo_format, name):
+    if not 0 < upload.size <= min(settings.UPLOAD_MAX_BYTES, PHOTO_MAX_BYTES):
+        raise serializers.ValidationError({"file": "团队照片不能为空，单张最多 10 MB。"})
+    try:
+        with Image.open(upload, formats=[photo_format]) as image:
+            if image.width * image.height > PHOTO_MAX_PIXELS:
+                raise serializers.ValidationError({"file": "团队照片不能超过 2500 万像素。"})
+            if getattr(image, "is_animated", False):
+                raise serializers.ValidationError({"file": "请上传静态团队照片。"})
+            with ImageOps.exif_transpose(image) as oriented:
+                mode = "RGBA" if "A" in oriented.getbands() or "transparency" in oriented.info else "RGB"
+                with oriented.convert(mode) as photo:
+                    photo.thumbnail((1600, 1600))
+                    with BytesIO() as output:
+                        # Export only pixels so location data and other camera metadata stay private.
+                        photo.save(output, format="WEBP", quality=85)
+                        return ContentFile(output.getvalue(), name=name)
+    except (Image.DecompressionBombError, OSError, SyntaxError, ValueError) as error:
+        raise serializers.ValidationError({"file": "团队照片无法读取，请选择有效的 JPG、PNG 或 WebP 图片。"}) from error
 
 
 def open_asset(asset):
@@ -94,7 +126,7 @@ def file_response(asset, attachment=False):
         open_asset(asset),
         as_attachment=attachment,
         filename=asset.original_name,
-        content_type=FORMATS[asset.extension][1],
+        content_type="image/webp" if asset.kind == Asset.Kind.PHOTO else FORMATS[asset.extension][1],
     ))
 
 

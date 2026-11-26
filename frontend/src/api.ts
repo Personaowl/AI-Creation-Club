@@ -79,6 +79,8 @@ export const changeWorkAccess = (id: string, fields: Partial<Pick<ManagedWork, '
   request<ManagedWork>(`manage/works/${id}/access/`, 'PATCH', fields)
 export const readCompetitions = () => request<Competition[]>('competitions/')
 export const createCompetition = (name: string) => request<Competition>('manage/competitions/', 'POST', { name })
+export const renameCompetition = (id: number, name: string) => request<Competition>(`manage/competitions/${id}/`, 'PATCH', { name })
+export const deleteCompetition = (id: number) => request<void>(`manage/competitions/${id}/`, 'DELETE')
 export const readComments = (id: string, before?: number) =>
   request<CommentPage>(`works/${id}/comments/` + (before === undefined ? '' : `?before=${before}`))
 export const addComment = (id: string, body: string) => request<WorkComment>(`works/${id}/comments/`, 'POST', { body })

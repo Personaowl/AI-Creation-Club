@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ArrowRight, ChevronRight, ClipboardCheck, Layers, LayoutDashboard, Search, Trophy, UserPlus, UsersRound } from '@lucide/vue'
 import { readManagedWorks, readMembers } from '../api'
 import type { MemberAccount } from '../api'
-import { statusLabels } from '../works'
+import { statusLabels, workAttachments } from '../works'
 import type { Competition, ManagedWork } from '../works'
 import CompetitionManager from './CompetitionManager.vue'
 import ManageMemberDialog from './ManageMemberDialog.vue'
@@ -14,7 +14,7 @@ type Section = 'overview' | 'works' | 'display' | 'competitions' | 'accounts'
 type WorkFilter = 'pending' | 'rejected' | 'unlisted' | 'published'
 
 const props = defineProps<{ section: Section; competitions: Competition[] }>()
-const emit = defineEmits<{ workUpdated: []; competitionCreated: [competition: Competition] }>()
+const emit = defineEmits<{ workUpdated: []; competitionChanged: [id: number, updated?: Competition] }>()
 const sections = [
   { id: 'overview', title: '概览', href: '#manage', icon: LayoutDashboard },
   { id: 'works', title: '作品审核', href: '#manage/works', icon: ClipboardCheck },
@@ -126,6 +126,11 @@ function updateWork(work: ManagedWork) {
   emit('workUpdated')
 }
 
+function updateCompetition(id: number, updated?: Competition) {
+  emit('competitionChanged', id, updated)
+  void refresh(true)
+}
+
 function selectFilter(filter: WorkFilter) {
   if (filter === 'pending' || filter === 'rejected') reviewFilter.value = filter
   else displayFilter.value = filter
@@ -168,7 +173,7 @@ onBeforeUnmount(() => {
     </header>
     <p v-if="notice" class="site-feedback glass-panel" role="status">{{ notice }}</p>
 
-    <CompetitionManager v-if="section === 'competitions'" :competitions="competitions" @created="emit('competitionCreated', $event)" />
+    <CompetitionManager v-if="section === 'competitions'" :competitions="competitions" @changed="updateCompetition" />
     <div v-else-if="error" class="manage-empty glass-panel" role="alert">
       <p>{{ error }}</p>
       <button type="button" class="glass-button" @click="refresh()">重试</button>
@@ -193,7 +198,7 @@ onBeforeUnmount(() => {
         <ul v-if="pending.length" class="manage-rows">
           <li v-for="work in pending.slice(0, 5)" :key="work.id">
             <button class="manage-row" type="button" @click="openWork(work.id)">
-              <span class="manage-row-title"><strong>{{ work.title }}</strong><small>{{ work.revision_of ? '修改稿 · ' : '' }}{{ work.owner_username }} · {{ work.assets.length }} 个附件</small></span>
+              <span class="manage-row-title"><strong>{{ work.title }}</strong><small>{{ work.revision_of ? '修改稿 · ' : '' }}{{ work.owner_username }} · {{ workAttachments(work).length }} 个附件</small></span>
               <time :datetime="work.updated_at">{{ date.format(new Date(work.updated_at)) }}</time>
               <ChevronRight :size="18" aria-hidden="true" />
             </button>
@@ -213,7 +218,7 @@ onBeforeUnmount(() => {
       <ul v-if="filteredWorks.length" class="manage-rows">
         <li v-for="work in filteredWorks" :key="work.id">
           <button class="manage-row" type="button" @click="openWork(work.id)">
-            <span class="manage-row-title"><strong>{{ work.title }}</strong><small>{{ work.revision_of ? '修改稿 · ' : '' }}{{ work.owner_username }} · {{ work.assets.length }} 个附件</small></span>
+            <span class="manage-row-title"><strong>{{ work.title }}</strong><small>{{ work.revision_of ? '修改稿 · ' : '' }}{{ work.owner_username }} · {{ workAttachments(work).length }} 个附件</small></span>
             <span class="manage-status" :data-status="work.status">{{ work.is_visible ? '已上架' : work.status === 'approved' ? '待上架' : statusLabels[work.status] }}</span>
             <ChevronRight :size="18" aria-hidden="true" />
           </button>

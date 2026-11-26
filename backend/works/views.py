@@ -79,21 +79,43 @@ def competition_list(request):
     return Response(CompetitionSerializer(Competition.objects.all(), many=True).data)
 
 
-@api_view(["POST"])
-@permission_classes([IsAdministrator])
-def create_competition(request):
-    payload = CompetitionSerializer(data=request.data)
+def save_competition(payload):
     payload.is_valid(raise_exception=True)
     name = payload.validated_data["name"]
     key = normalize("NFC", name.casefold())
     try:
         with transaction.atomic():
-            payload.save(name_key=key)
+            return payload.save(name_key=key)
     except IntegrityError:
         if Competition.objects.filter(name_key=key).exists():
             raise serializers.ValidationError({"name": "这个比赛分类已存在。"}) from None
         raise
+
+
+@api_view(["POST"])
+@permission_classes([IsAdministrator])
+def create_competition(request):
+    payload = CompetitionSerializer(data=request.data)
+    save_competition(payload)
     return Response(payload.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH", "DELETE"])
+@permission_classes([IsAdministrator])
+@transaction.atomic
+def manage_competition(request, competition_id):
+    competition = get_object_or_404(Competition.objects.select_for_update(), pk=competition_id)
+    works = Work.objects.filter(competition=competition)
+    if request.method == "DELETE":
+        works.update(competition=None, competition_name="")
+        competition.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    previous_name = competition.name
+    payload = CompetitionSerializer(competition, data=request.data)
+    updated = save_competition(payload)
+    if updated.name != previous_name:
+        works.update(competition_name=updated.name)
+    return Response(payload.data)
 
 
 @api_view(["GET", "POST"])
@@ -190,9 +212,19 @@ def access(request, work_id):
 @api_view(["GET"])
 def download(request, work_id, asset_id):
     asset = visible_asset(request, work_id, asset_id)
+    if asset.kind == Asset.Kind.PHOTO:
+        raise NotFound()
     if not can_download_work(request.user, asset.work):
         raise PermissionDenied("此作品未开放原件下载。")
     return file_response(asset, attachment=True)
+
+
+@api_view(["GET"])
+def photo(request, work_id, asset_id):
+    asset = visible_asset(request, work_id, asset_id)
+    if asset.kind != Asset.Kind.PHOTO:
+        raise NotFound()
+    return file_response(asset)
 
 
 @api_view(["GET"])

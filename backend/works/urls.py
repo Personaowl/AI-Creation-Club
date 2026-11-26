@@ -6,6 +6,7 @@ from .models import Asset
 urlpatterns = [
     path("competitions/", views.competition_list),
     path("manage/competitions/", views.create_competition),
+    path("manage/competitions/<int:competition_id>/", views.manage_competition),
     path("works/", views.work_list),
     path("works/<uuid:work_id>/", views.work_detail),
     path("works/<uuid:work_id>/revision/", views.start_revision),
@@ -14,6 +15,7 @@ urlpatterns = [
     path("works/<uuid:work_id>/assets/", views.upload),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/", views.delete_asset),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/download/", views.download, name="asset_download"),
+    path("works/<uuid:work_id>/assets/<uuid:asset_id>/photo/", views.photo),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/video/", views.media, {"kind": Asset.Kind.VIDEO}),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/audio/", views.media, {"kind": Asset.Kind.AUDIO}, name="asset_audio"),
     path("works/<uuid:work_id>/assets/<uuid:asset_id>/pdf/<int:page>/", views.pdf_page, name="asset_pdf_page"),

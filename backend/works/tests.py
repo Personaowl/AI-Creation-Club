@@ -1,3 +1,4 @@
+from contextlib import closing
 from io import BytesIO
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
@@ -8,6 +9,7 @@ import pypdfium2 as pdfium
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
+from PIL import Image
 
 from .models import AccessChange, Asset, Work, WorkComment
 
@@ -35,6 +37,14 @@ def sample_pdf():
     return content.getvalue()
 
 
+def team_photo():
+    with BytesIO() as content, Image.new("RGB", (1800, 900), "steelblue") as image:
+        exif = Image.Exif()
+        exif[315] = "Private camera owner"
+        image.save(content, format="JPEG", exif=exif)
+        return SimpleUploadedFile("比赛合照.jpg", content.getvalue())
+
+
 class WorkTests(TestCase):
     def setUp(self):
         directory = self.enterContext(TemporaryDirectory())
@@ -48,8 +58,8 @@ class WorkTests(TestCase):
         self.viewer.force_login(self.other)
         self.client.force_login(self.admin)
 
-    def draft(self, title="竞赛作品"):
-        response = self.author.post("/api/works/", {"title": title, "description": "项目介绍"})
+    def draft(self, title="竞赛作品", award_info="未获奖"):
+        response = self.author.post("/api/works/", {"title": title, "description": "项目介绍", "award_info": award_info})
         self.assertEqual(response.status_code, 201, response.content)
         return response.json()["id"]
 
@@ -96,6 +106,46 @@ class WorkTests(TestCase):
         self.assertEqual(response.json()["competition_name"], "")
         self.assertTrue(response.json()["is_visible"])
         self.assertEqual(AccessChange.objects.filter(work_id=work).count(), 1)
+
+    def test_admin_can_rename_or_delete_competitions_without_removing_works(self):
+        def category(name):
+            return self.client.post("/api/manage/competitions/", {"name": name}).json()["id"]
+
+        competition_id = category("省赛")
+        other_id = category("Global Cup")
+        path = f"/api/manage/competitions/{competition_id}/"
+        self.assertEqual(self.author.patch(path, {"name": "新名称"}, content_type="application/json").status_code, 403)
+        self.assertEqual(self.viewer.delete(path).status_code, 403)
+        for invalid in ("  ", "GLOBAL  CUP"):
+            self.assertEqual(self.client.patch(path, {"name": invalid}, content_type="application/json").status_code, 400)
+        self.assertEqual(self.client.patch(path, {}, content_type="application/json").status_code, 400)
+
+        published = self.draft()
+        other = self.draft("另一分类的作品")
+        for work_id, category_id in ((published, competition_id), (other, other_id)):
+            response = self.author.patch(f"/api/works/{work_id}/", {"competition": category_id}, content_type="application/json")
+            self.assertEqual(response.status_code, 200)
+        attachment = self.attachment(published, pptx())
+        self.publish(published)
+        public_path = f"/api/works/{published}/"
+        revision_id = self.author.post(public_path + "revision/").json()["id"]
+
+        renamed = self.client.patch(path, {"name": " 省级 创新赛 "}, content_type="application/json")
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.json(), {"id": competition_id, "name": "省级 创新赛"})
+        self.assertEqual(self.viewer.get(public_path).json()["competition_name"], "省级 创新赛")
+        self.assertEqual(Work.objects.get(pk=revision_id).competition_name, "省级 创新赛")
+
+        self.assertEqual(self.client.delete(path).status_code, 204)
+        self.assertEqual(self.client.delete(path).status_code, 404)
+        self.assertEqual(self.viewer.get("/api/competitions/").json(), [{"id": other_id, "name": "Global Cup"}])
+        work = self.viewer.get(public_path).json()
+        self.assertIsNone(work["competition"])
+        self.assertEqual(work["competition_name"], "")
+        self.assertTrue(work["is_visible"])
+        self.assertEqual(work["assets"][0]["id"], attachment)
+        self.assertTrue(Work.objects.filter(pk=revision_id, competition=None, competition_name="").exists())
+        self.assertTrue(Work.objects.filter(pk=other, competition_id=other_id).exists())
 
     def test_comments_follow_publication_and_require_author_or_admin_to_delete(self):
         work = self.draft()
@@ -151,11 +201,14 @@ class WorkTests(TestCase):
 
     def test_published_revision_replaces_content_only_after_approval(self):
         original = self.draft("上架版本")
+        source = f"/api/works/{original}/"
+        original_details = {"team_intro": "原团队介绍", "award_info": "评审中", "ip_details": "专利申请中"}
+        self.assertEqual(self.author.patch(source, original_details, content_type="application/json").status_code, 200)
         kept = self.attachment(original, pptx())
+        kept_photo = self.attachment(original, team_photo())
         removed = self.attachment(original, SimpleUploadedFile("旧附件.pdf", sample_pdf()))
         removed_file = Asset.objects.get(pk=removed).file
         self.publish(original, download=True)
-        source = f"/api/works/{original}/"
         self.viewer.post(source + "comments/", {"body": "原有评论"})
         self.assertEqual(self.viewer.post(source + "revision/").status_code, 403)
         self.assertEqual(self.author.patch(source, {"title": "绕过审核"}, content_type="application/json").status_code, 403)
@@ -166,6 +219,8 @@ class WorkTests(TestCase):
         revision_link = f'/api/works/{revision["id"]}/'
         self.assertEqual(revision["revision_of"], original)
         self.assertEqual(revision["title"], "上架版本")
+        self.assertEqual({name: revision[name] for name in original_details}, original_details)
+        self.assertEqual(sum(asset["kind"] == Asset.Kind.PHOTO for asset in revision["assets"]), 1)
         self.assertEqual(self.author.post(source + "revision/").json()["id"], revision["id"])
         self.assertEqual([entry["id"] for entry in self.author.get("/api/works/?scope=mine").json()], [original])
         self.assertIsNone(self.viewer.get(source).json()["revision"])
@@ -179,14 +234,17 @@ class WorkTests(TestCase):
         self.assertTrue(removed_file.storage.exists(removed_file.name))
 
         new_asset = self.attachment(revision["id"], SimpleUploadedFile("新版附件.pdf", sample_pdf()))
-        self.assertEqual(self.author.patch(revision_link, {"title": "修改后版本"}, content_type="application/json").status_code, 200)
+        updated_details = {"title": "修改后版本", "team_intro": "新版团队介绍", "award_info": "一等奖", "ip_details": "专利已授权"}
+        self.assertEqual(self.author.patch(revision_link, updated_details, content_type="application/json").status_code, 200)
         self.assertEqual(self.author.post(revision_link + "submit/").status_code, 200)
         self.assertEqual(self.author.get(source).json()["revision"]["status"], Work.Status.PENDING)
         self.assertEqual(self.client.get("/api/works/?scope=review").json()[0]["id"], revision["id"])
         self.assertEqual(self.author.post(revision_link + "withdraw/").json()["status"], Work.Status.DRAFT)
         self.assertEqual(self.author.post(revision_link + "submit/").status_code, 200)
         self.assertEqual(self.viewer.get(source).json()["title"], "上架版本")
-        self.assertEqual(self.viewer.get(source + f"assets/{removed}/download/").status_code, 200)
+        self.assertEqual(self.viewer.get(source).json()["award_info"], original_details["award_info"])
+        with closing(self.viewer.get(source + f"assets/{removed}/download/")) as response:
+            self.assertEqual(response.status_code, 200)
         self.assertEqual(self.viewer.get(revision_link + f"assets/{new_asset}/download/").status_code, 404)
 
         review = f'/api/manage/works/{revision["id"]}/review/'
@@ -201,11 +259,14 @@ class WorkTests(TestCase):
         self.assertFalse(removed_file.storage.exists(removed_file.name))
         self.assertEqual(self.author.get(revision_link).status_code, 404)
         current = self.viewer.get(source).json()
-        self.assertEqual(current["title"], "修改后版本")
+        self.assertEqual({name: current[name] for name in updated_details}, updated_details)
         self.assertTrue(current["is_visible"])
         self.assertTrue(current["can_download"])
-        self.assertEqual({asset["id"] for asset in current["assets"]}, {kept, new_asset})
-        self.assertEqual(self.viewer.get(source + f"assets/{new_asset}/download/").status_code, 200)
+        self.assertEqual({asset["id"] for asset in current["assets"]}, {kept, kept_photo, new_asset})
+        with closing(self.viewer.get(source + f"assets/{kept_photo}/photo/")) as response:
+            self.assertEqual(response.status_code, 200)
+        with closing(self.viewer.get(source + f"assets/{new_asset}/download/")) as response:
+            self.assertEqual(response.status_code, 200)
         self.assertEqual(self.viewer.get(source + "comments/").json()["items"][0]["body"], "原有评论")
         self.assertEqual(Work.objects.get(pk=original).reviews.filter(is_revision=True).count(), 2)
         self.assertNotEqual(self.author.post(source + "revision/").json()["id"], revision["id"])
@@ -262,7 +323,10 @@ class WorkTests(TestCase):
         work = self.draft()
         address = f"/api/works/{work}/"
         old_payload = self.author.get(address).json()
-        details = {"competition_name": "创意竞赛", "team_name": "星光团队", "team_members": "成员一\n成员二"}
+        details = {
+            "competition_name": "创意竞赛", "team_name": "星光团队", "team_members": "成员一\n成员二",
+            "team_intro": "团队分工", "ip_details": "论文已发表\n软著登记中",
+        }
         for name in details:
             self.assertEqual(old_payload[name], "")
         result = self.author.patch(address, details, content_type="application/json")
@@ -272,6 +336,34 @@ class WorkTests(TestCase):
         published = self.viewer.get(address).json()
         self.assertEqual({name: published[name] for name in details}, details)
         self.assertEqual(self.client.get("/api/works/?scope=all").json()[0]["team_name"], details["team_name"])
+
+    def test_award_is_required_for_submission_and_team_photos_are_supplementary(self):
+        work = self.draft(award_info="  ")
+        address = f"/api/works/{work}/"
+        self.assertEqual(self.author.get(address).json()["award_info"], "")
+        invalid = self.author.post(address + "assets/", {"file": SimpleUploadedFile("伪装.jpg", b"invalid")})
+        self.assertEqual(invalid.status_code, 400)
+        photo = self.attachment(work, team_photo())
+        photo_path = address + f"assets/{photo}/photo/"
+        self.assertEqual(self.viewer.get(photo_path).status_code, 404)
+        self.assertEqual(self.author.post(address + "submit/").status_code, 400)
+        self.assertEqual(self.author.patch(address, {"award_info": "未获奖"}, content_type="application/json").status_code, 200)
+        response = self.author.post(address + "submit/")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("作品附件", response.json()["detail"])
+        attachment = self.attachment(work, pptx())
+        self.publish(work)
+        self.assertEqual(Client().get(photo_path).status_code, 403)
+        with closing(self.viewer.get(photo_path)) as response:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response["Content-Type"], "image/webp")
+            self.assertEqual(response["Cache-Control"], "private, no-store")
+            with Image.open(BytesIO(b"".join(response.streaming_content))) as image:
+                self.assertEqual(image.size, (1600, 800))
+                self.assertFalse(image.getexif())
+        self.assertEqual(self.viewer.get(address + f"assets/{attachment}/photo/").status_code, 404)
+        self.client.patch(f"/api/manage/works/{work}/access/", {"is_visible": False}, content_type="application/json")
+        self.assertEqual(self.viewer.get(photo_path).status_code, 404)
 
     def test_only_author_can_withdraw_pending_work_and_resubmit(self):
         work = self.draft()

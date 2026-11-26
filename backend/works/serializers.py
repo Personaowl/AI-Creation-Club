@@ -13,7 +13,10 @@ class AssetSerializer(serializers.ModelSerializer):
 class WorkWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Work
-        fields = ("title", "description", "competition", "competition_name", "team_name", "team_members")
+        fields = (
+            "title", "description", "competition", "competition_name", "team_name", "team_members",
+            "team_intro", "award_info", "ip_details",
+        )
 
     def validate(self, attrs):
         if "competition" in attrs:
@@ -35,7 +38,8 @@ class WorkSerializer(serializers.ModelSerializer):
     class Meta:
         model = Work
         fields = (
-            "id", "title", "description", "competition", "competition_name", "team_name", "team_members", "status", "is_visible", "assets",
+            "id", "title", "description", "competition", "competition_name", "team_name", "team_members",
+            "team_intro", "award_info", "ip_details", "status", "is_visible", "assets",
             "created_at", "updated_at", "is_mine", "can_edit", "can_download", "review_note",
             "revision_of", "can_revise", "revision",
         )

@@ -28,6 +28,9 @@ class Work(models.Model):
     competition = models.ForeignKey(Competition, null=True, blank=True, on_delete=models.PROTECT, related_name="works")
     team_name = models.CharField("团队名称", max_length=120, blank=True)
     team_members = models.TextField("团队成员", max_length=600, blank=True)
+    team_intro = models.TextField("团队简介", max_length=1200, blank=True)
+    award_info = models.CharField("获奖情况", max_length=200, blank=True)
+    ip_details = models.TextField("知识产权情况", max_length=1200, blank=True)
     status = models.CharField("审核状态", max_length=10, choices=Status.choices, default=Status.DRAFT)
     is_visible = models.BooleanField("上架展示", default=False)
     allow_download = models.BooleanField("允许成员下载原件", default=False)
@@ -70,6 +73,7 @@ class Asset(models.Model):
         VIDEO = "video", "视频"
         AUDIO = "audio", "音频"
         SOURCE = "source", "源码附件"
+        PHOTO = "photo", "团队照片"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     work = models.ForeignKey(Work, on_delete=models.CASCADE, related_name="assets")
