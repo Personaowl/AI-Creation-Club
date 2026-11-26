@@ -12,6 +12,18 @@ class Competition(models.Model):
         ordering = ["name", "id"]
 
 
+class CompetitionEdition(models.Model):
+    competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name="editions")
+    year = models.PositiveSmallIntegerField("年份")
+
+    class Meta:
+        ordering = ["-year"]
+        constraints = [
+            models.UniqueConstraint(fields=["competition", "year"], name="one_edition_per_competition_year"),
+            models.CheckConstraint(condition=models.Q(year__range=(1900, 2099)), name="competition_edition_valid_year"),
+        ]
+
+
 class Work(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "草稿"
@@ -26,6 +38,7 @@ class Work(models.Model):
     description = models.TextField("作品简介", max_length=3000, blank=True)
     competition_name = models.CharField("比赛名称", max_length=120, blank=True)
     competition = models.ForeignKey(Competition, null=True, blank=True, on_delete=models.PROTECT, related_name="works")
+    competition_edition = models.ForeignKey(CompetitionEdition, null=True, blank=True, on_delete=models.SET_NULL, related_name="works")
     team_name = models.CharField("团队名称", max_length=120, blank=True)
     team_members = models.TextField("团队成员", max_length=600, blank=True)
     team_intro = models.TextField("团队简介", max_length=1200, blank=True)
@@ -42,6 +55,10 @@ class Work(models.Model):
         ordering = ["-updated_at"]
         indexes = [models.Index(fields=["status", "is_visible", "-updated_at"])]
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(competition_edition__isnull=True) | models.Q(competition__isnull=False),
+                name="work_edition_requires_competition",
+            ),
             models.CheckConstraint(
                 condition=models.Q(status="approved") | models.Q(is_visible=False, allow_download=False),
                 name="work_access_requires_approval",

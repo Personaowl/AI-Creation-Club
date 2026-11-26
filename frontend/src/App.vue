@@ -1,28 +1,20 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import {
-  Aperture, ChevronDown, Clapperboard, Code2, Compass, FileText, FolderOpen, Heart,
-  LayoutGrid, Moon, Music2, Plus, Presentation, Search, ShieldCheck, Sun, X,
+  Aperture, CalendarDays, ChevronDown, Clapperboard, Code2, Compass, FileText, FolderOpen, Heart,
+  LayoutGrid, Moon, Music2, Plus, Presentation, Search, ShieldCheck, Sun, Trophy, X,
 } from '@lucide/vue'
 import { readCompetitions, readSession, readWorks, signOut } from './api'
 import type { Account } from './api'
 import { brandName, platformName } from './branding'
 import AccountMenu from './components/AccountMenu.vue'
+import GlassFilter from './components/GlassFilter.vue'
 import LoginPage from './components/LoginPage.vue'
 import PasswordDialog from './components/PasswordDialog.vue'
 import UploadDialog from './components/UploadDialog.vue'
 import WorkCover from './components/WorkCover.vue'
 import { kindLabels, statusLabels, workAttachments, workDetailPath } from './works'
-import type { Competition, Cover, Work, WorkKind } from './works'
-
-const categories = [
-  { id: 'all', label: '全部', icon: LayoutGrid },
-  { id: 'slides', label: kindLabels.slides, icon: Presentation },
-  { id: 'pdf', label: kindLabels.pdf, icon: FileText },
-  { id: 'video', label: kindLabels.video, icon: Clapperboard },
-  { id: 'audio', label: kindLabels.audio, icon: Music2 },
-  { id: 'source', label: kindLabels.source, icon: Code2 },
-] as const
+import type { Competition, Cover, FilterValue, Work, WorkKind } from './works'
 const icons = { slides: Presentation, pdf: FileText, video: Clapperboard, audio: Music2, source: Code2 }
 const covers: Partial<Record<WorkKind, Cover>> = { slides: 'form', video: 'lake', source: 'code' }
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' })
@@ -31,7 +23,6 @@ const PdfReader = defineAsyncComponent(() => import('./components/PdfReader.vue'
 const WorkDetailPage = defineAsyncComponent(() => import('./components/WorkDetailPage.vue'))
 
 type View = 'library' | 'mine' | 'favorites'
-type Category = 'all' | WorkKind
 
 const account = ref<Account | null>(null)
 const starting = ref(true)
@@ -43,8 +34,8 @@ const mine = ref<Work[]>([])
 const competitions = ref<Competition[]>([])
 const favorites = ref<string[]>([])
 const view = ref<View>('library')
-const category = ref<Category>('all')
-const competitionFilter = ref<'all' | 'unclassified' | number>('all')
+const competitionFilter = ref<FilterValue>('all')
+const yearFilter = ref<FilterValue>('all')
 const search = ref('')
 const sort = ref<'recent' | 'oldest' | 'title'>('recent')
 const draft = ref<Work>()
@@ -84,7 +75,25 @@ watchEffect(() => {
   else delete document.documentElement.dataset.theme
 })
 const galleryTitle = computed(() => ({ library: '全部作品', mine: '我的投稿', favorites: '我的收藏' })[view.value])
-const hasFilters = computed(() => Boolean(search.value.trim() || category.value !== 'all' || competitionFilter.value !== 'all'))
+const hasFilters = computed(() => Boolean(search.value.trim() || competitionFilter.value !== 'all' || yearFilter.value !== 'all'))
+const competitionOptions = computed(() => [
+  { value: 'all' as const, label: '全部比赛' },
+  ...competitions.value.map(item => ({ value: item.id, label: item.name })),
+  { value: 'unset' as const, label: '未分类' },
+])
+const yearOptions = computed(() => {
+  const id = competitionFilter.value
+  const groups = id === 'all' ? competitions.value : competitions.value.filter(item => item.id === id)
+  const years = [...new Set(groups.flatMap(item => item.years))].sort((a, b) => b - a)
+  return [
+    { value: 'all' as const, label: '全部年份' },
+    ...years.map(year => ({ value: year, label: year + ' 年' })),
+    { value: 'unset' as const, label: '未标注年份' },
+  ]
+})
+watch(yearOptions, options => {
+  if (competitionFilter.value === 'unset' || !options.some(option => option.value === yearFilter.value)) yearFilter.value = 'all'
+})
 let refreshNumber = 0
 
 function favoriteKey(id: number) {
@@ -105,8 +114,8 @@ const shownWorks = computed(() => {
   const source = view.value === 'mine' ? mine.value : records.value
   return source.filter(work =>
     (view.value !== 'favorites' || favorites.value.includes(work.id)) &&
-    (category.value === 'all' || work.assets.some(asset => asset.kind === category.value)) &&
-    (competitionFilter.value === 'all' || work.competition === (competitionFilter.value === 'unclassified' ? null : competitionFilter.value)) &&
+    (competitionFilter.value === 'all' || work.competition === (competitionFilter.value === 'unset' ? null : competitionFilter.value)) &&
+    (yearFilter.value === 'all' || work.competition_year === (yearFilter.value === 'unset' ? null : yearFilter.value)) &&
     (!keyword || [work.title, work.description, work.competition_name, work.team_name, ...work.assets.map(asset => asset.original_name)]
       .some(value => value?.toLocaleLowerCase().includes(keyword))),
   ).sort((a, b) => {
@@ -271,8 +280,8 @@ function focusWorkDetails() {
 }
 
 function clearFilters() {
-  category.value = 'all'
   competitionFilter.value = 'all'
+  yearFilter.value = 'all'
   search.value = ''
 }
 
@@ -404,7 +413,6 @@ function onWithdrawn(work: Work) {
               <span class="hero-brand-name">{{ brandName }}</span>
               <span class="hero-platform-type">作品平台</span>
             </h1>
-            <p>浏览竞赛演示文稿、文档、音视频与源码项目。</p>
             <a class="glass-button hero-action" href="#gallery"><LayoutGrid :size="16" aria-hidden="true" /> 浏览作品</a>
           </div>
           <div class="hero-art" aria-hidden="true">
@@ -431,21 +439,15 @@ function onWithdrawn(work: Work) {
             </div>
           </div>
           <div class="gallery-toolbar">
-            <div class="filters glass-panel" role="group" aria-label="按作品类型筛选">
-              <button v-for="item in categories" :key="item.id" class="filter-button" :class="{ active: category === item.id }"
-                :aria-pressed="category === item.id" type="button" @click="category = item.id">
-                <component :is="item.icon" :size="16" :stroke-width="1.9" /> {{ item.label }}
-              </button>
+            <div class="gallery-classification" role="group" aria-label="比赛筛选">
+              <GlassFilter v-model="competitionFilter" class="competition-filter" label="按比赛分类筛选" :options="competitionOptions" searchable>
+                <template #icon><Trophy :size="17" aria-hidden="true" /></template>
+              </GlassFilter>
+              <GlassFilter v-model="yearFilter" label="按年份筛选" :options="yearOptions" :disabled="competitionFilter === 'unset'">
+                <template #icon><CalendarDays :size="17" aria-hidden="true" /></template>
+              </GlassFilter>
             </div>
             <div class="gallery-selects">
-              <div class="sort-field glass-panel">
-                <select v-model="competitionFilter" aria-label="按比赛分类筛选">
-                  <option value="all">全部比赛</option>
-                  <option v-for="item in competitions" :key="item.id" :value="item.id">{{ item.name }}</option>
-                  <option value="unclassified">未分类</option>
-                </select>
-                <ChevronDown :size="16" aria-hidden="true" />
-              </div>
               <div class="sort-field glass-panel">
                 <select v-model="sort" aria-label="作品排序">
                   <option value="recent">最近更新</option>
@@ -468,7 +470,10 @@ function onWithdrawn(work: Work) {
                 </div>
                 <div class="work-copy">
                   <h3>{{ work.title }}</h3>
-                  <span v-if="work.competition_name" class="work-competition">{{ work.competition_name }}</span>
+                  <span v-if="work.competition_name" class="work-competition">
+                    <span v-if="work.competition_year" class="work-edition">{{ work.competition_year }}</span>
+                    {{ work.competition_name }}
+                  </span>
                   <p>{{ work.description || '暂无简介' }}</p>
                   <div class="work-meta">
                     <span>{{ workAttachments(work).length }} 个附件</span>

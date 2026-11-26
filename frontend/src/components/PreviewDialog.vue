@@ -22,7 +22,9 @@ watch(attachments, items => {
   <GlassDialog :title="work.title" labelledby="preview-heading" :description="work.description" wide @close="!busy && emit('close')">
     <slot name="context" />
     <p v-if="work.review_note" class="review-note">{{ work.review_note }}</p>
-    <p v-if="work.competition_name" class="manage-work-context">比赛名称 {{ work.competition_name }}</p>
+    <p v-if="work.competition_name" class="manage-work-context">
+      {{ work.competition_name }} <span v-if="work.competition_year" class="work-edition">{{ work.competition_year }} 年</span>
+    </p>
     <WorkOverview :work="work" class="moderation-overview" />
     <label v-if="attachments.length > 1" class="form-field attachment-choice">
       <span>作品附件</span>

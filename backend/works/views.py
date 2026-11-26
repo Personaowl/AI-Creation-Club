@@ -33,7 +33,7 @@ def work_data(request, work, managed=False):
 
 
 def visible_work(request, work_id):
-    work = get_object_or_404(Work.objects.select_related("competition", "revision").prefetch_related("assets"), pk=work_id)
+    work = get_object_or_404(Work.objects.select_related("competition", "competition_edition", "revision").prefetch_related("assets"), pk=work_id)
     if not can_view_work(request.user, work):
         raise NotFound()
     return work
@@ -51,10 +51,10 @@ def work_list(request):
     if request.method == "POST":
         payload = WorkWriteSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
-        work = payload.save(owner=request.user)
+        work = services.create_work(request.user, **payload.validated_data)
         return Response(work_data(request, work), status=status.HTTP_201_CREATED)
 
-    records = Work.objects.select_related("competition", "revision").prefetch_related("assets")
+    records = Work.objects.select_related("competition", "competition_edition", "revision").prefetch_related("assets")
     scope = request.query_params.get("scope", "gallery")
     serializer = WorkSerializer
     match scope:
@@ -76,7 +76,7 @@ def work_list(request):
 
 @api_view(["GET"])
 def competition_list(request):
-    return Response(CompetitionSerializer(Competition.objects.all(), many=True).data)
+    return Response(CompetitionSerializer(Competition.objects.prefetch_related("editions"), many=True).data)
 
 
 def save_competition(payload):
@@ -87,7 +87,7 @@ def save_competition(payload):
         with transaction.atomic():
             return payload.save(name_key=key)
     except IntegrityError:
-        if Competition.objects.filter(name_key=key).exists():
+        if Competition.objects.filter(name_key=key).exclude(pk=getattr(payload.instance, "pk", None)).exists():
             raise serializers.ValidationError({"name": "这个比赛分类已存在。"}) from None
         raise
 
@@ -107,7 +107,7 @@ def manage_competition(request, competition_id):
     competition = get_object_or_404(Competition.objects.select_for_update(), pk=competition_id)
     works = Work.objects.filter(competition=competition)
     if request.method == "DELETE":
-        works.update(competition=None, competition_name="")
+        works.update(competition=None, competition_edition=None, competition_name="")
         competition.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     previous_name = competition.name

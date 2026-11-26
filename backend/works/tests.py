@@ -132,13 +132,13 @@ class WorkTests(TestCase):
 
         renamed = self.client.patch(path, {"name": " 省级 创新赛 "}, content_type="application/json")
         self.assertEqual(renamed.status_code, 200)
-        self.assertEqual(renamed.json(), {"id": competition_id, "name": "省级 创新赛"})
+        self.assertEqual(renamed.json(), {"id": competition_id, "name": "省级 创新赛", "years": []})
         self.assertEqual(self.viewer.get(public_path).json()["competition_name"], "省级 创新赛")
         self.assertEqual(Work.objects.get(pk=revision_id).competition_name, "省级 创新赛")
 
         self.assertEqual(self.client.delete(path).status_code, 204)
         self.assertEqual(self.client.delete(path).status_code, 404)
-        self.assertEqual(self.viewer.get("/api/competitions/").json(), [{"id": other_id, "name": "Global Cup"}])
+        self.assertEqual(self.viewer.get("/api/competitions/").json(), [{"id": other_id, "name": "Global Cup", "years": []}])
         work = self.viewer.get(public_path).json()
         self.assertIsNone(work["competition"])
         self.assertEqual(work["competition_name"], "")
@@ -146,6 +146,48 @@ class WorkTests(TestCase):
         self.assertEqual(work["assets"][0]["id"], attachment)
         self.assertTrue(Work.objects.filter(pk=revision_id, competition=None, competition_name="").exists())
         self.assertTrue(Work.objects.filter(pk=other, competition_id=other_id).exists())
+
+    def test_competition_years_are_validated_and_preserved_through_revision(self):
+        competitions = "/api/manage/competitions/"
+        creation = self.client.post(
+            competitions, {"name": "年度创新赛", "edition_years": [2025, 2026, 2025]}, content_type="application/json",
+        )
+        self.assertEqual(creation.status_code, 201)
+        competition = creation.json()
+        self.assertEqual(competition["years"], [2026, 2025])
+        other = self.client.post(
+            competitions, {"name": "其他比赛", "edition_years": [2024]}, content_type="application/json",
+        ).json()["id"]
+        details = {"title": "参赛作品", "award_info": "评审中", "competition": competition["id"], "competition_year": 2026}
+        self.assertEqual(self.author.post("/api/works/", {**details, "competition_year": 2024}).status_code, 400)
+        created = self.author.post("/api/works/", details)
+        self.assertEqual(created.status_code, 201, created.content)
+        work = created.json()["id"]
+        path = f"/api/works/{work}/"
+        self.assertEqual(created.json()["competition_year"], 2026)
+        self.attachment(work, pptx())
+        self.publish(work)
+        self.assertEqual(self.viewer.get(path).json()["competition_year"], 2026)
+        revision = self.author.post(path + "revision/").json()
+        self.assertEqual(revision["competition_year"], 2026)
+        self.assertEqual(self.author.patch(f'/api/works/{revision["id"]}/', {"competition_year": 2025}, content_type="application/json").status_code, 200)
+        self.assertEqual(self.author.post(f'/api/works/{revision["id"]}/submit/').status_code, 200)
+        self.assertEqual(self.client.post(f'/api/manage/works/{revision["id"]}/review/', {"decision": "approved"}).status_code, 200)
+        self.assertEqual(self.viewer.get(path).json()["competition_year"], 2025)
+
+        competition_path = competitions + f'{competition["id"]}/'
+        self.assertEqual(self.author.patch(competition_path, {"name": competition["name"], "edition_years": []}, content_type="application/json").status_code, 403)
+        updated = self.client.patch(competition_path, {"name": competition["name"], "edition_years": [2026, 2027]}, content_type="application/json")
+        self.assertEqual(updated.json()["years"], [2027, 2026])
+        self.assertIsNone(self.viewer.get(path).json()["competition_year"])
+        self.assertEqual(self.viewer.get(path).json()["competition"], competition["id"])
+
+        access = f"/api/manage/works/{work}/access/"
+        self.assertEqual(self.client.patch(access, {"competition_year": 2024}, content_type="application/json").status_code, 400)
+        reassigned = self.client.patch(access, {"competition": other, "competition_year": 2024}, content_type="application/json")
+        self.assertEqual(reassigned.json()["competition_year"], 2024)
+        cleared = self.client.patch(access, {"competition": competition["id"]}, content_type="application/json")
+        self.assertIsNone(cleared.json()["competition_year"])
 
     def test_comments_follow_publication_and_require_author_or_admin_to_delete(self):
         work = self.draft()

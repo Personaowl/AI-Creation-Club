@@ -77,13 +77,18 @@
 .manage-access label { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
 .manage-access input { width: 18px; height: 18px; accent-color: var(--accent); }
 .manage-display-form { display: grid; gap: 7px; }
-.competition-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; max-width: 560px; margin-bottom: 24px; }
+.competition-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, 135px) auto; align-items: end; gap: 9px; max-width: 650px; margin-bottom: 24px; }
 .competition-form > p { grid-column: 1 / -1; }
 .competition-form input { min-height: 44px; }
 .competition-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 8px 6px; }
-.competition-row > span { flex: 1 1 140px; overflow-wrap: anywhere; }
+.competition-row-name { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.competition-row-name strong { font-size: 15px; }
 .competition-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .competition-action-form { display: grid; gap: 12px; }
+.competition-edit-year { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.competition-years { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0 0; padding: 0; list-style: none; }
+.competition-years:not(.editable-years) li { padding: 2px 8px; border-radius: var(--pill); background: var(--manage-inner); color: var(--muted); font-size: 13px; }
+.competition-years button { font-variant-numeric: tabular-nums; }
 
 :root[data-theme="dark"] {
   --manage-surface: #282b47d9;
@@ -102,6 +107,8 @@
 [data-theme="dark"] .manage-metric[data-metric] { --glass-fill: var(--manage-surface); }
 
 @media (max-width: 560px) {
+  .competition-form { grid-template-columns: minmax(0, 1fr) minmax(95px, .5fr); }
+  .competition-form > button { grid-column: 1 / -1; justify-self: start; }
   .manage-tabs { width: 100%; }
   .manage-tabs a { flex: 1; padding-inline: 6px; font-size: 13px; }
   .manage-metrics { gap: 6px; }

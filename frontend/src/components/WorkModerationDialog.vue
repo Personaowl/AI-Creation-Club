@@ -4,6 +4,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Check, Trash2, Undo2 } from '@lucide/
 import { changeWorkAccess, deleteManagedWork, RequestError, reviewWork } from '../api'
 import { statusLabels } from '../works'
 import type { Competition, ManagedWork } from '../works'
+import CompetitionAssignment from './CompetitionAssignment.vue'
 import PreviewDialog from './PreviewDialog.vue'
 
 const props = defineProps<{ work: ManagedWork; competitions: Competition[]; mode: 'review' | 'display' }>()
@@ -12,6 +13,7 @@ const noteField = ref<HTMLTextAreaElement>()
 const note = ref('')
 const downloadable = ref(props.work.allow_download)
 const competition = ref(props.work.competition)
+const competitionYear = ref(props.work.competition_year)
 const saving = ref(false)
 const error = ref('')
 const feedback = ref('')
@@ -21,6 +23,7 @@ const cancelDeleteButton = ref<HTMLButtonElement>()
 
 watch(() => props.work.allow_download, value => { downloadable.value = value })
 watch(() => props.work.competition, value => { competition.value = value })
+watch(() => props.work.competition_year, value => { competitionYear.value = value })
 
 async function save(request: () => Promise<ManagedWork>, message: string) {
   if (saving.value) return
@@ -48,9 +51,10 @@ function review(decision: 'approved' | 'rejected') {
 }
 
 function saveAccess() {
-  const changes: Partial<Pick<ManagedWork, 'allow_download' | 'competition'>> = {}
+  const changes: Partial<Pick<ManagedWork, 'allow_download' | 'competition' | 'competition_year'>> = {}
   if (downloadable.value !== props.work.allow_download) changes.allow_download = downloadable.value
   if (competition.value !== props.work.competition) changes.competition = competition.value
+  if (competitionYear.value !== props.work.competition_year) changes.competition_year = competitionYear.value
   void save(() => changeWorkAccess(props.work.id, changes), '展示设置已保存。')
 }
 
@@ -126,16 +130,11 @@ async function removeWork() {
           </div>
         </div>
         <form v-else class="manage-display-form" @submit.prevent="saveAccess">
-          <label class="form-field">
-            <span>比赛分类</span>
-            <select v-model="competition" :disabled="saving">
-              <option :value="null">未分类</option>
-              <option v-for="item in competitions" :key="item.id" :value="item.id">{{ item.name }}</option>
-            </select>
-          </label>
+          <CompetitionAssignment v-model:competition="competition" v-model:year="competitionYear" :competitions="competitions" :disabled="saving" />
           <div class="manage-access">
             <label><input v-model="downloadable" type="checkbox" :disabled="saving"> 允许成员下载原件</label>
-            <button class="primary-button" type="submit" :disabled="saving || (downloadable === work.allow_download && competition === work.competition)">保存设置</button>
+            <button class="primary-button" type="submit"
+              :disabled="saving || (downloadable === work.allow_download && competition === work.competition && competitionYear === work.competition_year)">保存设置</button>
           </div>
         </form>
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>

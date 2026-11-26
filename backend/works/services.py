@@ -3,12 +3,12 @@ from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from .files import PHOTO_MAX_COUNT, prepare_upload
-from .models import AccessChange, Asset, Review, Work
+from .models import AccessChange, Asset, CompetitionEdition, Review, Work
 from .policies import active, can_edit_work, can_revise_work
 
 
 CONTENT_FIELDS = (
-    "title", "description", "competition_id", "competition_name", "team_name", "team_members",
+    "title", "description", "competition_id", "competition_name", "competition_edition_id", "team_name", "team_members",
     "team_intro", "award_info", "ip_details",
 )
 
@@ -25,6 +25,31 @@ def require_editable(user, work):
 def require_reviewer(user):
     if not active(user) or not user.is_superuser:
         raise PermissionDenied("需要管理员权限。")
+
+
+def apply_competition_fields(fields, work=None):
+    competition_id = work.competition_id if work else None
+    if "competition" in fields:
+        competition = fields.pop("competition")
+        fields["competition_id"] = competition.pk if competition else None
+        fields["competition_name"] = competition.name if competition else ""
+        if fields["competition_id"] != competition_id:
+            fields["competition_edition_id"] = None
+        competition_id = fields["competition_id"]
+    if "competition_year" in fields:
+        year = fields.pop("competition_year")
+        edition_id = None
+        if year is not None:
+            edition_id = CompetitionEdition.objects.filter(competition_id=competition_id, year=year).values_list("pk", flat=True).first()
+            if edition_id is None:
+                raise ValidationError({"competition_year": "请选择该比赛已设置的年份。"})
+        fields["competition_edition_id"] = edition_id
+
+
+@transaction.atomic
+def create_work(user, **fields):
+    apply_competition_fields(fields)
+    return Work.objects.create(owner=user, **fields)
 
 
 @transaction.atomic
@@ -47,6 +72,7 @@ def start_revision(user, work_id):
 def edit_work(user, work_id, **fields):
     work = lock_work(work_id)
     require_editable(user, work)
+    apply_competition_fields(fields, work)
     for field, value in fields.items():
         setattr(work, field, value)
     if fields:
@@ -179,10 +205,7 @@ def change_access(user, work_id, **fields):
     work = lock_work(work_id)
     if work.status != Work.Status.APPROVED:
         raise ValidationError({"detail": "通过审核后才能设置上架与下载。"})
-    if "competition" in fields:
-        competition = fields.pop("competition")
-        fields["competition_id"] = competition.pk if competition else None
-        fields["competition_name"] = competition.name if competition else ""
+    apply_competition_fields(fields, work)
     changes = {field: value for field, value in fields.items() if getattr(work, field) != value}
     for field, value in changes.items():
         setattr(work, field, value)

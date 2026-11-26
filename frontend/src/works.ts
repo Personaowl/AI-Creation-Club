@@ -14,6 +14,7 @@ export interface WorkDetails {
   title: string
   description: string
   competition: number | null
+  competition_year: number | null
   team_name: string
   team_members: string
   team_intro: string
@@ -46,7 +47,10 @@ export interface ManagedWork extends Work {
 export interface Competition {
   id: number
   name: string
+  years: number[]
 }
+
+export type FilterValue = number | 'all' | 'unset'
 
 export interface WorkComment {
   id: number

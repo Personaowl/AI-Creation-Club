@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronDown, ImagePlus, Trash2, UploadCloud } from '@lucide/vue'
+import { ImagePlus, Trash2, UploadCloud } from '@lucide/vue'
 import GlassDialog from './GlassDialog.vue'
+import CompetitionAssignment from './CompetitionAssignment.vue'
 import { createWork, deleteAsset, submitWork, updateWork, uploadAsset } from '../api'
 import { fileExtension, fileExtensions, fileFormatLabels, fileKinds, fileSize, photoExtensions, photoMaxBytes, photoMaxCount, workAttachments } from '../works'
 import type { Asset, Competition, Work, WorkDetails } from '../works'
@@ -11,6 +12,7 @@ const emit = defineEmits<{ close: []; saved: [work: Work] }>()
 const title = ref(props.work?.title ?? '')
 const description = ref(props.work?.description ?? '')
 const competition = ref<number | null>(props.work?.competition ?? null)
+const competitionYear = ref<number | null>(props.work?.competition_year ?? null)
 const teamName = ref(props.work?.team_name ?? '')
 const teamMembers = ref(props.work?.team_members ?? '')
 const teamIntro = ref(props.work?.team_intro ?? '')
@@ -33,6 +35,7 @@ function workDetails(): WorkDetails {
     title: title.value.trim(),
     description: description.value.trim(),
     competition: competition.value,
+    competition_year: competitionYear.value,
     team_name: teamName.value.trim(),
     team_members: teamMembers.value.trim(),
     team_intro: teamIntro.value.trim(),
@@ -45,7 +48,7 @@ function close() {
   if (saving.value) return
   const details = workDetails()
   const dirty = files.value.length || photos.value.length || Object.entries(details).some(([key, value]) =>
-    value !== (draft.value?.[key as keyof WorkDetails] ?? (key === 'competition' ? null : '')),
+    value !== (draft.value?.[key as keyof WorkDetails] ?? (key === 'competition' || key === 'competition_year' ? null : '')),
   )
   if (dirty && !window.confirm('关闭后，未保存的填写内容和待上传文件会丢失。确定关闭？')) return
   emit('close')
@@ -157,22 +160,11 @@ async function save(sendForReview: boolean) {
         <span>作品简介</span>
         <textarea v-model="description" maxlength="3000" rows="3" :disabled="saving" />
       </label>
-      <div class="upload-work-details">
-        <label class="form-field">
-          <span>比赛分类</span>
-          <span class="attachment-select">
-            <select v-model="competition" :disabled="saving">
-              <option :value="null">未分类</option>
-              <option v-for="item in competitions" :key="item.id" :value="item.id">{{ item.name }}</option>
-            </select>
-            <ChevronDown :size="16" aria-hidden="true" />
-          </span>
-        </label>
-        <label class="form-field">
-          <span>获奖情况 <small>审核必填</small></span>
-          <input ref="awardInput" v-model="awardInfo" maxlength="200" required :disabled="saving" placeholder="未获奖或评审中也可填写">
-        </label>
-      </div>
+      <CompetitionAssignment v-model:competition="competition" v-model:year="competitionYear" :competitions="competitions" :disabled="saving" />
+      <label class="form-field">
+        <span>获奖情况 <small>审核必填</small></span>
+        <input ref="awardInput" v-model="awardInfo" maxlength="200" required :disabled="saving" placeholder="未获奖或评审中也可填写">
+      </label>
       <label class="form-field">
         <span>知识产权情况</span>
         <textarea v-model="ipDetails" maxlength="1200" rows="2" :disabled="saving" placeholder="论文、专利、软著" />

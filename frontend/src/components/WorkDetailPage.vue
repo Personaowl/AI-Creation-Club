@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ArrowLeft, ArrowUpRight, Download, File, Heart, Play, Undo2 } from '@lucide/vue'
+import { ArrowLeft, ArrowUpRight, Download, File, Files, Heart, Play, Trophy, Undo2 } from '@lucide/vue'
 import { readWork, RequestError, startRevision, withdrawWork } from '../api'
 import { brandName } from '../branding'
 import { assetPath, fileSize, kindLabels, pdfReaderPath, statusLabels, workAttachments, workDetailPath } from '../works'
@@ -104,7 +104,10 @@ async function withdraw() {
     <template v-if="work">
       <header class="work-detail-hero glass-panel">
         <div>
-          <p v-if="work.competition_name" class="work-detail-competition">{{ work.competition_name }}</p>
+          <div v-if="work.competition_name" class="work-detail-competition">
+            <Trophy :size="16" aria-hidden="true" /> <span>{{ work.competition_name }}</span>
+            <span v-if="work.competition_year" class="work-edition">{{ work.competition_year }} 年</span>
+          </div>
           <h1 ref="heading" tabindex="-1">{{ work.title }}</h1>
           <p v-if="work.description" class="work-detail-prose">{{ work.description }}</p>
         </div>
@@ -131,7 +134,7 @@ async function withdraw() {
       <WorkOverview :work="work" />
 
       <section class="work-detail-panel" aria-labelledby="work-attachments-heading">
-        <h2 id="work-attachments-heading">作品附件</h2>
+        <h2 id="work-attachments-heading" class="work-section-heading"><span><Files :size="19" aria-hidden="true" /></span> 作品附件</h2>
         <ul v-if="attachments.length" class="work-file-list">
           <li v-for="asset in attachments" :key="asset.id">
             <div class="work-file-title">

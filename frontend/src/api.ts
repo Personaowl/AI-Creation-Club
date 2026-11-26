@@ -75,12 +75,14 @@ export const readWork = (id: string) => request<Work>(`works/${id}/`)
 export const readManagedWorks = () => request<ManagedWork[]>('works/?scope=all')
 export const reviewWork = (id: string, decision: 'approved' | 'rejected', note: string) =>
   request<ManagedWork>(`manage/works/${id}/review/`, 'POST', { decision, note })
-export const changeWorkAccess = (id: string, fields: Partial<Pick<ManagedWork, 'is_visible' | 'allow_download' | 'competition'>>) =>
+export const changeWorkAccess = (id: string, fields: Partial<Pick<ManagedWork, 'is_visible' | 'allow_download' | 'competition' | 'competition_year'>>) =>
   request<ManagedWork>(`manage/works/${id}/access/`, 'PATCH', fields)
 export const deleteManagedWork = (id: string) => request<void>(`manage/works/${id}/`, 'DELETE')
 export const readCompetitions = () => request<Competition[]>('competitions/')
-export const createCompetition = (name: string) => request<Competition>('manage/competitions/', 'POST', { name })
-export const renameCompetition = (id: number, name: string) => request<Competition>(`manage/competitions/${id}/`, 'PATCH', { name })
+export const createCompetition = (name: string, years: number[]) =>
+  request<Competition>('manage/competitions/', 'POST', { name, edition_years: years })
+export const updateCompetition = (id: number, name: string, years: number[]) =>
+  request<Competition>(`manage/competitions/${id}/`, 'PATCH', { name, edition_years: years })
 export const deleteCompetition = (id: number) => request<void>(`manage/competitions/${id}/`, 'DELETE')
 export const readComments = (id: string, before?: number) =>
   request<CommentPage>(`works/${id}/comments/` + (before === undefined ? '' : `?before=${before}`))
